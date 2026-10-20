@@ -63,7 +63,9 @@ function DashboardLayout() {
       </div>
       <nav className="mt-8 flex gap-6 border-b border-line">
         {tabs.map((tab) => {
-          const active = current.replace(/\/$/, '') === tab.to
+          const path = current.replace(/\/$/, '')
+          // 订单详情归在“账单”标签下
+          const active = path === tab.to || (tab.to === '/dashboard/billing' && path.startsWith('/dashboard/orders/'))
           return (
             <LocalLink
               key={tab.to}

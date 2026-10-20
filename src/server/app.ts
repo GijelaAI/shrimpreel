@@ -341,7 +341,7 @@ app.get('/api/credits/ledger', async (c) => {
   const user = requireUser(c)
   const { limit, offset } = pageParams(c)
   const rows = await c.env.DB.prepare(
-    'SELECT id, delta, reason, ref_id, note, created_at FROM credit_ledger WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    'SELECT id, delta, reason, ref_id, note, created_at FROM credit_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?',
   )
     .bind(user.id, limit, offset)
     .all()
@@ -404,7 +404,7 @@ app.post('/api/checkout', async (c) => {
 app.get('/api/orders', async (c) => {
   const user = requireUser(c)
   const { limit, offset } = pageParams(c)
-  const rows = await c.env.DB.prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?')
+  const rows = await c.env.DB.prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?')
     .bind(user.id, limit, offset)
     .all<OrderRow>()
   return c.json({ orders: rows.results.map(publicOrder) })

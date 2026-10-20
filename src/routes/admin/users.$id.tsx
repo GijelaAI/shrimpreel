@@ -2,6 +2,7 @@ import { Link, createFileRoute } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { AdminPage, LoadState, Status, adminAction, money, shortDate, useAdminData } from '#/components/admin'
+import { orderStatus, type AdminOrder } from '#/components/admin-orders'
 import type { Generation } from '#/lib/api'
 import { useSession } from '#/lib/session'
 import type { AdminUserRow } from './users.index'
@@ -10,22 +11,15 @@ export const Route = createFileRoute('/admin/users/$id')({
   component: AdminUserDetail,
 })
 
-type OrderRow = {
-  id: string
-  provider: string
-  package_id: string
-  credits: number
-  amount_cents: number
-  currency: string
-  status: string
-  created_at: string
-}
 type LedgerRow = { id: string; delta: number; reason: string; note: string | null; created_at: string }
 type Detail = {
   user: AdminUserRow & { google_sub: string | null; locale: string | null }
-  orders: OrderRow[]
+  orders: Omit<AdminOrder, 'user_email'>[]
   ledger: LedgerRow[]
   generations: (Generation & { errorMessage: string | null })[]
+  spend: { currency: string; orders: number; paid_cents: number; refunded_cents: number }[]
+  generationStats: { status: string; n: number; credits: number }[]
+  audit: { id: string; action: string; detail: string | null; created_at: string; admin_email: string | null }[]
 }
 
 function AdminUserDetail() {
@@ -125,8 +119,10 @@ function AdminUserDetail() {
             </form>
           </div>
 
+          <Summary data={data} />
+
           <Section title={`订单（${data.orders.length}）`}>
-            <table className="table-admin">
+            <table className="table-admin" data-testid="admin-user-orders">
               <thead>
                 <tr>
                   <th>订单号</th>
@@ -140,14 +136,25 @@ function AdminUserDetail() {
               <tbody>
                 {data.orders.map((o) => (
                   <tr key={o.id}>
-                    <td className="font-mono text-xs">{o.id}</td>
+                    <td className="font-mono text-xs">
+                      <Link to="/admin/orders/$id" params={{ id: o.id }} className="hover:underline">
+                        {o.id}
+                      </Link>
+                    </td>
                     <td>{o.provider}</td>
                     <td>
                       {o.package_id} · {o.credits} 积分
                     </td>
-                    <td>{money(o.amount_cents, o.currency)}</td>
                     <td>
-                      <Status value={o.status} />
+                      {money(o.paid_amount_cents ?? o.amount_cents, o.paid_currency ?? o.currency)}
+                      {o.refunded_amount_cents > 0 ? (
+                        <span className="block text-xs text-muted">
+                          已退 {money(o.refunded_amount_cents, o.paid_currency ?? o.currency)} · {o.refunded_credits} 积分
+                        </span>
+                      ) : null}
+                    </td>
+                    <td>
+                      <Status value={orderStatus(o)} />
                     </td>
                     <td className="whitespace-nowrap">{shortDate(o.created_at)}</td>
                   </tr>
@@ -218,9 +225,70 @@ function AdminUserDetail() {
               </tbody>
             </table>
           </Section>
+
+          <Section title={`管理员操作（${data.audit.length}）`}>
+            <table className="table-admin" data-testid="admin-user-audit">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>操作</th>
+                  <th>管理员</th>
+                  <th>详情</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.audit.map((a) => (
+                  <tr key={a.id}>
+                    <td className="whitespace-nowrap">{shortDate(a.created_at)}</td>
+                    <td className="font-mono text-xs">{a.action}</td>
+                    <td>{a.admin_email ?? '—'}</td>
+                    <td className="max-w-md truncate text-xs text-muted" title={a.detail ?? ''}>
+                      {a.detail ?? ''}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Section>
         </>
       ) : null}
     </AdminPage>
+  )
+}
+
+// 累计付款（按实收币种，含已退部分）与生成概况，不受下方列表条数截断影响
+function Summary({ data }: { data: Detail }) {
+  const stat = (status: string) => data.generationStats.find((s) => s.status === status)
+  const totalGenerations = data.generationStats.reduce((sum, s) => sum + s.n, 0)
+  return (
+    <div className="grid gap-4 sm:grid-cols-2" data-testid="admin-user-summary">
+      <div className="card space-y-1 p-5 text-sm">
+        <h2 className="font-semibold">累计付款</h2>
+        {data.spend.length ? (
+          data.spend.map((s) => (
+            <p key={s.currency}>
+              <span className="font-mono text-lg font-semibold">{money(s.paid_cents - s.refunded_cents, s.currency)}</span>
+              <span className="ml-2 text-xs text-muted">
+                净额 · {s.orders} 笔付款
+                {s.refunded_cents > 0 ? ` · 已退 ${money(s.refunded_cents, s.currency)}` : ''}
+              </span>
+            </p>
+          ))
+        ) : (
+          <p className="text-muted">未付过款</p>
+        )}
+      </div>
+      <div className="card space-y-1 p-5 text-sm">
+        <h2 className="font-semibold">生成任务</h2>
+        <p>
+          <span className="font-mono text-lg font-semibold">{totalGenerations}</span>
+          <span className="ml-2 text-xs text-muted">
+            成功 {stat('succeeded')?.n ?? 0}（{stat('succeeded')?.credits ?? 0} 积分）· 失败 {stat('failed')?.n ?? 0} · 进行中{' '}
+            {(stat('queued')?.n ?? 0) + (stat('processing')?.n ?? 0)}
+          </span>
+        </p>
+      </div>
+    </div>
   )
 }
 

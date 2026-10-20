@@ -17,7 +17,6 @@ import { Route as AdminEmailsRouteImport } from './routes/admin/emails'
 import { Route as AdminEventsRouteImport } from './routes/admin/events'
 import { Route as AdminGenerationsRouteImport } from './routes/admin/generations'
 import { Route as AdminMessagesRouteImport } from './routes/admin/messages'
-import { Route as AdminOrdersRouteImport } from './routes/admin/orders'
 import { Route as AdminReportsRouteImport } from './routes/admin/reports'
 import { Route as AdminTakedownsRouteImport } from './routes/admin/takedowns'
 import { Route as Char123LocaleChar125IndexRouteImport } from './routes/{-$locale}/index'
@@ -31,6 +30,8 @@ import { Route as Char123LocaleChar125RefundPolicyRouteImport } from './routes/{
 import { Route as Char123LocaleChar125ReportRouteImport } from './routes/{-$locale}/report'
 import { Route as Char123LocaleChar125SignInRouteImport } from './routes/{-$locale}/sign-in'
 import { Route as Char123LocaleChar125TermsOfServiceRouteImport } from './routes/{-$locale}/terms-of-service'
+import { Route as AdminOrdersIndexRouteImport } from './routes/admin/orders.index'
+import { Route as AdminOrdersIdRouteImport } from './routes/admin/orders.$id'
 import { Route as AdminUsersIndexRouteImport } from './routes/admin/users.index'
 import { Route as AdminUsersIdRouteImport } from './routes/admin/users.$id'
 import { Route as Char123LocaleChar125CheckoutMockRouteImport } from './routes/{-$locale}/checkout/mock'
@@ -38,6 +39,7 @@ import { Route as Char123LocaleChar125CheckoutSuccessRouteImport } from './route
 import { Route as Char123LocaleChar125DashboardIndexRouteImport } from './routes/{-$locale}/dashboard/index'
 import { Route as Char123LocaleChar125DashboardBillingRouteImport } from './routes/{-$locale}/dashboard/billing'
 import { Route as Char123LocaleChar125DashboardSettingsRouteImport } from './routes/{-$locale}/dashboard/settings'
+import { Route as Char123LocaleChar125DashboardOrdersIdRouteImport } from './routes/{-$locale}/dashboard/orders.$id'
 
 const AdminRouteRoute = AdminRouteRouteImport.update({
   id: '/admin',
@@ -78,11 +80,6 @@ const AdminGenerationsRoute = AdminGenerationsRouteImport.update({
 const AdminMessagesRoute = AdminMessagesRouteImport.update({
   id: '/messages',
   path: '/messages',
-  getParentRoute: () => AdminRouteRoute,
-} as any)
-const AdminOrdersRoute = AdminOrdersRouteImport.update({
-  id: '/orders',
-  path: '/orders',
   getParentRoute: () => AdminRouteRoute,
 } as any)
 const AdminReportsRoute = AdminReportsRouteImport.update({
@@ -161,6 +158,16 @@ const Char123LocaleChar125TermsOfServiceRoute =
     path: '/terms-of-service',
     getParentRoute: () => Char123LocaleChar125RouteRoute,
   } as any)
+const AdminOrdersIndexRoute = AdminOrdersIndexRouteImport.update({
+  id: '/orders/',
+  path: '/orders/',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminOrdersIdRoute = AdminOrdersIdRouteImport.update({
+  id: '/orders/$id',
+  path: '/orders/$id',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
 const AdminUsersIndexRoute = AdminUsersIndexRouteImport.update({
   id: '/users/',
   path: '/users/',
@@ -201,6 +208,12 @@ const Char123LocaleChar125DashboardSettingsRoute =
     path: '/settings',
     getParentRoute: () => Char123LocaleChar125DashboardRouteRoute,
   } as any)
+const Char123LocaleChar125DashboardOrdersIdRoute =
+  Char123LocaleChar125DashboardOrdersIdRouteImport.update({
+    id: '/orders/$id',
+    path: '/orders/$id',
+    getParentRoute: () => Char123LocaleChar125DashboardRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteRouteWithChildren
@@ -211,7 +224,6 @@ export interface FileRoutesByFullPath {
   '/admin/events': typeof AdminEventsRoute
   '/admin/generations': typeof AdminGenerationsRoute
   '/admin/messages': typeof AdminMessagesRoute
-  '/admin/orders': typeof AdminOrdersRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/takedowns': typeof AdminTakedownsRoute
   '/{-$locale}/$slug': typeof Char123LocaleChar125SlugRoute
@@ -225,13 +237,16 @@ export interface FileRoutesByFullPath {
   '/{-$locale}/terms-of-service': typeof Char123LocaleChar125TermsOfServiceRoute
   '/admin/': typeof AdminIndexRoute
   '/{-$locale}/': typeof Char123LocaleChar125IndexRoute
+  '/admin/orders/$id': typeof AdminOrdersIdRoute
   '/admin/users/$id': typeof AdminUsersIdRoute
   '/{-$locale}/checkout/mock': typeof Char123LocaleChar125CheckoutMockRoute
   '/{-$locale}/checkout/success': typeof Char123LocaleChar125CheckoutSuccessRoute
   '/{-$locale}/dashboard/billing': typeof Char123LocaleChar125DashboardBillingRoute
   '/{-$locale}/dashboard/settings': typeof Char123LocaleChar125DashboardSettingsRoute
+  '/admin/orders/': typeof AdminOrdersIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/{-$locale}/dashboard/': typeof Char123LocaleChar125DashboardIndexRoute
+  '/{-$locale}/dashboard/orders/$id': typeof Char123LocaleChar125DashboardOrdersIdRoute
 }
 export interface FileRoutesByTo {
   '/admin/audit': typeof AdminAuditRoute
@@ -239,7 +254,6 @@ export interface FileRoutesByTo {
   '/admin/events': typeof AdminEventsRoute
   '/admin/generations': typeof AdminGenerationsRoute
   '/admin/messages': typeof AdminMessagesRoute
-  '/admin/orders': typeof AdminOrdersRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/takedowns': typeof AdminTakedownsRoute
   '/{-$locale}/$slug': typeof Char123LocaleChar125SlugRoute
@@ -253,13 +267,16 @@ export interface FileRoutesByTo {
   '/{-$locale}/terms-of-service': typeof Char123LocaleChar125TermsOfServiceRoute
   '/admin': typeof AdminIndexRoute
   '/{-$locale}': typeof Char123LocaleChar125IndexRoute
+  '/admin/orders/$id': typeof AdminOrdersIdRoute
   '/admin/users/$id': typeof AdminUsersIdRoute
   '/{-$locale}/checkout/mock': typeof Char123LocaleChar125CheckoutMockRoute
   '/{-$locale}/checkout/success': typeof Char123LocaleChar125CheckoutSuccessRoute
   '/{-$locale}/dashboard/billing': typeof Char123LocaleChar125DashboardBillingRoute
   '/{-$locale}/dashboard/settings': typeof Char123LocaleChar125DashboardSettingsRoute
+  '/admin/orders': typeof AdminOrdersIndexRoute
   '/admin/users': typeof AdminUsersIndexRoute
   '/{-$locale}/dashboard': typeof Char123LocaleChar125DashboardIndexRoute
+  '/{-$locale}/dashboard/orders/$id': typeof Char123LocaleChar125DashboardOrdersIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -271,7 +288,6 @@ export interface FileRoutesById {
   '/admin/events': typeof AdminEventsRoute
   '/admin/generations': typeof AdminGenerationsRoute
   '/admin/messages': typeof AdminMessagesRoute
-  '/admin/orders': typeof AdminOrdersRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/takedowns': typeof AdminTakedownsRoute
   '/{-$locale}/$slug': typeof Char123LocaleChar125SlugRoute
@@ -285,13 +301,16 @@ export interface FileRoutesById {
   '/{-$locale}/terms-of-service': typeof Char123LocaleChar125TermsOfServiceRoute
   '/admin/': typeof AdminIndexRoute
   '/{-$locale}/': typeof Char123LocaleChar125IndexRoute
+  '/admin/orders/$id': typeof AdminOrdersIdRoute
   '/admin/users/$id': typeof AdminUsersIdRoute
   '/{-$locale}/checkout/mock': typeof Char123LocaleChar125CheckoutMockRoute
   '/{-$locale}/checkout/success': typeof Char123LocaleChar125CheckoutSuccessRoute
   '/{-$locale}/dashboard/billing': typeof Char123LocaleChar125DashboardBillingRoute
   '/{-$locale}/dashboard/settings': typeof Char123LocaleChar125DashboardSettingsRoute
+  '/admin/orders/': typeof AdminOrdersIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/{-$locale}/dashboard/': typeof Char123LocaleChar125DashboardIndexRoute
+  '/{-$locale}/dashboard/orders/$id': typeof Char123LocaleChar125DashboardOrdersIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -304,7 +323,6 @@ export interface FileRouteTypes {
     | '/admin/events'
     | '/admin/generations'
     | '/admin/messages'
-    | '/admin/orders'
     | '/admin/reports'
     | '/admin/takedowns'
     | '/{-$locale}/$slug'
@@ -318,13 +336,16 @@ export interface FileRouteTypes {
     | '/{-$locale}/terms-of-service'
     | '/admin/'
     | '/{-$locale}/'
+    | '/admin/orders/$id'
     | '/admin/users/$id'
     | '/{-$locale}/checkout/mock'
     | '/{-$locale}/checkout/success'
     | '/{-$locale}/dashboard/billing'
     | '/{-$locale}/dashboard/settings'
+    | '/admin/orders/'
     | '/admin/users/'
     | '/{-$locale}/dashboard/'
+    | '/{-$locale}/dashboard/orders/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/admin/audit'
@@ -332,7 +353,6 @@ export interface FileRouteTypes {
     | '/admin/events'
     | '/admin/generations'
     | '/admin/messages'
-    | '/admin/orders'
     | '/admin/reports'
     | '/admin/takedowns'
     | '/{-$locale}/$slug'
@@ -346,13 +366,16 @@ export interface FileRouteTypes {
     | '/{-$locale}/terms-of-service'
     | '/admin'
     | '/{-$locale}'
+    | '/admin/orders/$id'
     | '/admin/users/$id'
     | '/{-$locale}/checkout/mock'
     | '/{-$locale}/checkout/success'
     | '/{-$locale}/dashboard/billing'
     | '/{-$locale}/dashboard/settings'
+    | '/admin/orders'
     | '/admin/users'
     | '/{-$locale}/dashboard'
+    | '/{-$locale}/dashboard/orders/$id'
   id:
     | '__root__'
     | '/admin'
@@ -363,7 +386,6 @@ export interface FileRouteTypes {
     | '/admin/events'
     | '/admin/generations'
     | '/admin/messages'
-    | '/admin/orders'
     | '/admin/reports'
     | '/admin/takedowns'
     | '/{-$locale}/$slug'
@@ -377,13 +399,16 @@ export interface FileRouteTypes {
     | '/{-$locale}/terms-of-service'
     | '/admin/'
     | '/{-$locale}/'
+    | '/admin/orders/$id'
     | '/admin/users/$id'
     | '/{-$locale}/checkout/mock'
     | '/{-$locale}/checkout/success'
     | '/{-$locale}/dashboard/billing'
     | '/{-$locale}/dashboard/settings'
+    | '/admin/orders/'
     | '/admin/users/'
     | '/{-$locale}/dashboard/'
+    | '/{-$locale}/dashboard/orders/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -447,13 +472,6 @@ declare module '@tanstack/react-router' {
       path: '/messages'
       fullPath: '/admin/messages'
       preLoaderRoute: typeof AdminMessagesRouteImport
-      parentRoute: typeof AdminRouteRoute
-    }
-    '/admin/orders': {
-      id: '/admin/orders'
-      path: '/orders'
-      fullPath: '/admin/orders'
-      preLoaderRoute: typeof AdminOrdersRouteImport
       parentRoute: typeof AdminRouteRoute
     }
     '/admin/reports': {
@@ -547,6 +565,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Char123LocaleChar125TermsOfServiceRouteImport
       parentRoute: typeof Char123LocaleChar125RouteRoute
     }
+    '/admin/orders/': {
+      id: '/admin/orders/'
+      path: '/orders'
+      fullPath: '/admin/orders/'
+      preLoaderRoute: typeof AdminOrdersIndexRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/orders/$id': {
+      id: '/admin/orders/$id'
+      path: '/orders/$id'
+      fullPath: '/admin/orders/$id'
+      preLoaderRoute: typeof AdminOrdersIdRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
     '/admin/users/': {
       id: '/admin/users/'
       path: '/users'
@@ -596,6 +628,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Char123LocaleChar125DashboardSettingsRouteImport
       parentRoute: typeof Char123LocaleChar125DashboardRouteRoute
     }
+    '/{-$locale}/dashboard/orders/$id': {
+      id: '/{-$locale}/dashboard/orders/$id'
+      path: '/orders/$id'
+      fullPath: '/{-$locale}/dashboard/orders/$id'
+      preLoaderRoute: typeof Char123LocaleChar125DashboardOrdersIdRouteImport
+      parentRoute: typeof Char123LocaleChar125DashboardRouteRoute
+    }
   }
 }
 
@@ -605,11 +644,12 @@ interface AdminRouteRouteChildren {
   AdminEventsRoute: typeof AdminEventsRoute
   AdminGenerationsRoute: typeof AdminGenerationsRoute
   AdminMessagesRoute: typeof AdminMessagesRoute
-  AdminOrdersRoute: typeof AdminOrdersRoute
   AdminReportsRoute: typeof AdminReportsRoute
   AdminTakedownsRoute: typeof AdminTakedownsRoute
   AdminIndexRoute: typeof AdminIndexRoute
+  AdminOrdersIdRoute: typeof AdminOrdersIdRoute
   AdminUsersIdRoute: typeof AdminUsersIdRoute
+  AdminOrdersIndexRoute: typeof AdminOrdersIndexRoute
   AdminUsersIndexRoute: typeof AdminUsersIndexRoute
 }
 
@@ -619,11 +659,12 @@ const AdminRouteRouteChildren: AdminRouteRouteChildren = {
   AdminEventsRoute: AdminEventsRoute,
   AdminGenerationsRoute: AdminGenerationsRoute,
   AdminMessagesRoute: AdminMessagesRoute,
-  AdminOrdersRoute: AdminOrdersRoute,
   AdminReportsRoute: AdminReportsRoute,
   AdminTakedownsRoute: AdminTakedownsRoute,
   AdminIndexRoute: AdminIndexRoute,
+  AdminOrdersIdRoute: AdminOrdersIdRoute,
   AdminUsersIdRoute: AdminUsersIdRoute,
+  AdminOrdersIndexRoute: AdminOrdersIndexRoute,
   AdminUsersIndexRoute: AdminUsersIndexRoute,
 }
 
@@ -635,6 +676,7 @@ interface Char123LocaleChar125DashboardRouteRouteChildren {
   Char123LocaleChar125DashboardBillingRoute: typeof Char123LocaleChar125DashboardBillingRoute
   Char123LocaleChar125DashboardSettingsRoute: typeof Char123LocaleChar125DashboardSettingsRoute
   Char123LocaleChar125DashboardIndexRoute: typeof Char123LocaleChar125DashboardIndexRoute
+  Char123LocaleChar125DashboardOrdersIdRoute: typeof Char123LocaleChar125DashboardOrdersIdRoute
 }
 
 const Char123LocaleChar125DashboardRouteRouteChildren: Char123LocaleChar125DashboardRouteRouteChildren =
@@ -645,6 +687,8 @@ const Char123LocaleChar125DashboardRouteRouteChildren: Char123LocaleChar125Dashb
       Char123LocaleChar125DashboardSettingsRoute,
     Char123LocaleChar125DashboardIndexRoute:
       Char123LocaleChar125DashboardIndexRoute,
+    Char123LocaleChar125DashboardOrdersIdRoute:
+      Char123LocaleChar125DashboardOrdersIdRoute,
   }
 
 const Char123LocaleChar125DashboardRouteRouteWithChildren =

@@ -92,14 +92,41 @@ adminRoutes.get('/stats', async (c) => {
 
 // ---------- 用户 ----------
 
+// 付过款的订单（含之后被全额退款的），用于“付费用户”筛选和付款订单数
+const PAID_ORDERS = `(SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id AND o.status IN ('paid', 'refunded'))`
+const USER_SORTS: Record<string, string> = {
+  created: 'u.created_at DESC',
+  login: 'u.last_login_at IS NULL, u.last_login_at DESC',
+  credits: 'u.credits DESC, u.created_at DESC',
+}
+
 adminRoutes.get('/users', async (c) => {
   const { limit, offset } = pageParams(c)
+  const where: string[] = []
+  const params: unknown[] = []
   const q = (c.req.query('q') ?? '').trim().toLowerCase()
-  const rows = q
-    ? await c.env.DB.prepare('SELECT * FROM users WHERE email LIKE ? OR id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?')
-        .bind(`%${q}%`, q, limit, offset)
-        .all<UserRow>()
-    : await c.env.DB.prepare('SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?').bind(limit, offset).all<UserRow>()
+  const status = c.req.query('status')
+  const role = c.req.query('role')
+  if (q) {
+    where.push('(u.email LIKE ? OR u.id = ?)')
+    params.push(`%${q}%`, q)
+  }
+  if (status) {
+    where.push('u.status = ?')
+    params.push(status)
+  }
+  if (role) {
+    where.push('u.role = ?')
+    params.push(role)
+  }
+  if (c.req.query('paying') === '1') where.push(`${PAID_ORDERS} > 0`)
+  const order = USER_SORTS[c.req.query('sort') ?? ''] ?? USER_SORTS.created
+  const rows = await c.env.DB.prepare(
+    `SELECT u.*, ${PAID_ORDERS} AS paid_orders FROM users u
+     ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${order} LIMIT ? OFFSET ?`,
+  )
+    .bind(...params, limit, offset)
+    .all<UserRow & { paid_orders: number }>()
   return c.json({ users: rows.results })
 })
 
@@ -108,16 +135,34 @@ adminRoutes.get('/users/:id', async (c) => {
   const id = c.req.param('id')
   const user = await db.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<UserRow>()
   if (!user) throw new ApiError(404, 'not_found')
-  const [orders, ledger, generations] = await db.batch([
+  const [orders, ledger, generations, spend, generationStats, auditRows] = await db.batch([
     db.prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').bind(id),
     db.prepare('SELECT * FROM credit_ledger WHERE user_id = ? ORDER BY created_at DESC LIMIT 100').bind(id),
     db.prepare('SELECT * FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').bind(id),
+    // 累计付款按实收币种汇总，不受上面 50 条的截断影响
+    db
+      .prepare(
+        `SELECT COALESCE(paid_currency, currency) AS currency, COUNT(*) AS orders,
+         SUM(COALESCE(paid_amount_cents, amount_cents)) AS paid_cents, SUM(refunded_amount_cents) AS refunded_cents
+         FROM orders WHERE user_id = ? AND status IN ('paid', 'refunded') GROUP BY 1`,
+      )
+      .bind(id),
+    db.prepare('SELECT status, COUNT(*) AS n, SUM(credits_cost) AS credits FROM generations WHERE user_id = ? GROUP BY status').bind(id),
+    db
+      .prepare(
+        `SELECT a.id, a.action, a.detail, a.created_at, u.email AS admin_email FROM admin_audit a
+         LEFT JOIN users u ON u.id = a.admin_user_id WHERE a.target_type = 'user' AND a.target_id = ? ORDER BY a.created_at DESC LIMIT 50`,
+      )
+      .bind(id),
   ])
   return c.json({
     user,
     orders: orders!.results,
     ledger: ledger!.results,
     generations: (generations!.results as unknown as GenerationRow[]).map((g) => ({ ...publicGeneration(g), errorMessage: g.error_message })),
+    spend: spend!.results,
+    generationStats: generationStats!.results,
+    audit: auditRows!.results,
   })
 })
 
@@ -206,6 +251,34 @@ adminRoutes.get('/orders', async (c) => {
   return c.json({ orders: rows.results })
 })
 
+// 订单详情：订单本身 + 支付商事件、积分流水、管理员操作、相关邮件，客服按时间线排查“付了钱没到账”“退款没回收”等问题
+adminRoutes.get('/orders/:id', async (c) => {
+  const db = c.env.DB
+  const id = c.req.param('id')
+  const order = await db
+    .prepare('SELECT o.*, u.email AS user_email, u.credits AS user_credits FROM orders o JOIN users u ON u.id = o.user_id WHERE o.id = ?')
+    .bind(id)
+    .first<OrderRow & { user_email: string; user_credits: number }>()
+  if (!order) throw new ApiError(404, 'not_found')
+  const [events, ledger, auditRows, emails] = await db.batch([
+    // payload 含支付商回传的客户信息，详情页只列事件摘要
+    db
+      .prepare('SELECT id, provider, event_id, event_type, status, error, created_at FROM payment_events WHERE order_id = ? ORDER BY created_at')
+      .bind(id),
+    db.prepare('SELECT id, delta, reason, note, created_at FROM credit_ledger WHERE ref_id = ? ORDER BY created_at').bind(id),
+    db
+      .prepare(
+        `SELECT a.id, a.action, a.detail, a.created_at, u.email AS admin_email FROM admin_audit a
+         LEFT JOIN users u ON u.id = a.admin_user_id WHERE a.target_type = 'order' AND a.target_id = ? ORDER BY a.created_at`,
+      )
+      .bind(id),
+    db
+      .prepare('SELECT id, template, to_email, status, last_error, created_at, sent_at FROM email_outbox WHERE dedupe_key LIKE ? ORDER BY created_at')
+      .bind(`%:${id}`),
+  ])
+  return c.json({ order, events: events!.results, ledger: ledger!.results, audit: auditRows!.results, emails: emails!.results })
+})
+
 // 退款（支持部分金额）：
 // - mode=provider（Waffo / Dodo 订单默认）：调用支付商退款 API 真正退钱，积分回收和订单状态等退款 webhook 回来按实际金额处理
 // - mode=local（mock 订单、或已在支付商后台退过款但 webhook 丢失时）：只做本地记账并按比例回收积分
@@ -286,15 +359,26 @@ adminRoutes.post('/orders/:id/mark-paid', async (c) => {
 
 adminRoutes.get('/generations', async (c) => {
   const { limit, offset } = pageParams(c)
+  const where: string[] = []
+  const params: unknown[] = []
   const status = c.req.query('status')
+  const q = (c.req.query('q') ?? '').trim()
+  if (status) {
+    where.push('g.status = ?')
+    params.push(status)
+  }
+  if (q) {
+    where.push('(g.id = ? OR g.provider_request_id = ? OR u.email LIKE ?)')
+    params.push(q, q, `%${q.toLowerCase()}%`)
+  }
   const db = c.env.DB
   const [rows, perCreditRow] = await db.batch([
     db
       .prepare(
         `SELECT g.*, u.email AS user_email FROM generations g JOIN users u ON u.id = g.user_id
-         ${status ? 'WHERE g.status = ?' : ''} ORDER BY g.created_at DESC LIMIT ? OFFSET ?`,
+         ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY g.created_at DESC LIMIT ? OFFSET ?`,
       )
-      .bind(...(status ? [status] : []), limit, offset),
+      .bind(...params, limit, offset),
     revenuePerCredit(db),
   ])
   return c.json({ generations: rows!.results, revenuePerCreditCents: perCredit(perCreditRow!) })

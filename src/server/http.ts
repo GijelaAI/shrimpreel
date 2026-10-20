@@ -78,6 +78,9 @@ export function publicOrder(o: OrderRow) {
     credits: o.credits,
     amountCents: o.amount_cents,
     currency: o.currency,
+    // 实收（支付商回传，可能与标价币种不同）；pending 订单为 null
+    paidAmountCents: o.paid_amount_cents,
+    paidCurrency: o.paid_currency,
     status: o.status,
     refundedAmountCents: o.refunded_amount_cents ?? 0,
     refundedCredits: o.refunded_credits ?? 0,

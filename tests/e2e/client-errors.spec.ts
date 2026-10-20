@@ -65,7 +65,9 @@ test('渲染出错时显示错误页和错误编号，编号与上报一致；�
   await devLogin(page.request, uniqueEmail('crash'))
   await buyPackage(page.request, 'starter')
   // 模拟接口返回了前端没预料到的数据：账单页渲染订单时抛 TypeError
-  await page.route('**/api/orders', (route) => route.fulfill({ json: { orders: [null] } }))
+  // 账单页分页请求 /api/orders?page=N，用正则匹配带查询参数的地址
+  const ordersApi = /\/api\/orders(\?|$)/
+  await page.route(ordersApi, (route) => route.fulfill({ json: { orders: [null] } }))
   await page.goto('/dashboard/billing')
 
   await expect(page.getByRole('heading', { name: en.common.errorTitle })).toBeVisible()
@@ -77,7 +79,7 @@ test('渲染出错时显示错误页和错误编号，编号与上报一致；�
   expect(boundary.message).toMatch(/^TypeError: /)
   expect(boundary.page).toBe(`${ORIGIN}/dashboard/billing`)
 
-  await page.unroute('**/api/orders')
+  await page.unroute(ordersApi)
   await page.getByRole('button', { name: en.common.retry }).click()
   await expect(page.getByTestId('orders-table')).toBeVisible()
   await expect(page.getByTestId('error-id')).toHaveCount(0)

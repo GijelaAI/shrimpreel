@@ -82,6 +82,8 @@ export type Order = {
   credits: number
   amountCents: number
   currency: string
+  paidAmountCents: number | null
+  paidCurrency: string | null
   status: 'pending' | 'paid' | 'failed' | 'refunded' | 'canceled'
   refundedAmountCents: number // >0 且 status=paid 表示部分退款
   refundedCredits: number

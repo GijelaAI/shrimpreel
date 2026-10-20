@@ -1,5 +1,5 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import {
   AdminPage,
   FilterSelect,
@@ -40,10 +40,21 @@ type GenerationRow = {
 
 function AdminGenerations() {
   const [status, setStatus] = useState('')
+  const [input, setInput] = useState('')
+  const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
+  const params = new URLSearchParams({ page: String(page) })
+  if (status) params.set('status', status)
+  if (q) params.set('q', q)
   const { data, error, loading, reload } = useAdminData<{ generations: GenerationRow[]; revenuePerCreditCents: number | null }>(
-    `/api/admin/generations?page=${page}${status ? `&status=${status}` : ''}`,
+    `/api/admin/generations?${params}`,
   )
+
+  function search(event: FormEvent) {
+    event.preventDefault()
+    setPage(1)
+    setQ(input.trim())
+  }
   const rows = data?.generations ?? []
   const perCredit = data?.revenuePerCreditCents ?? null
 
@@ -60,21 +71,29 @@ function AdminGenerations() {
         </button>
       }
     >
-      <FilterSelect
-        label="状态"
-        value={status}
-        onChange={(v) => {
-          setStatus(v)
-          setPage(1)
-        }}
-        options={[
-          ['', '全部'],
-          ['queued', '排队中'],
-          ['processing', '生成中'],
-          ['succeeded', '成功'],
-          ['failed', '失败'],
-        ]}
-      />
+      <div className="flex flex-wrap items-center gap-4">
+        <FilterSelect
+          label="状态"
+          value={status}
+          onChange={(v) => {
+            setStatus(v)
+            setPage(1)
+          }}
+          options={[
+            ['', '全部'],
+            ['queued', '排队中'],
+            ['processing', '生成中'],
+            ['succeeded', '成功'],
+            ['failed', '失败'],
+          ]}
+        />
+        <form onSubmit={search} className="flex gap-2">
+          <input className="input w-72 py-1.5" placeholder="任务 ID / 邮箱 / 服务商请求 ID" value={input} onChange={(e) => setInput(e.target.value)} />
+          <button type="submit" className="btn-primary px-4 py-1.5">
+            搜索
+          </button>
+        </form>
+      </div>
       <LoadState loading={loading && !data} error={error} empty={!!data && !rows.length} />
       {rows.length ? (
         <div className="card overflow-x-auto">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { formatPrice } from '#/config/site'
 import { api, errorCode } from '#/lib/api'
 import { Spinner, StatusPill } from './ui'
@@ -8,16 +8,22 @@ export function useAdminData<T>(path: string) {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // 只采用最后一次请求的结果：连续切换筛选时，先发出的请求可能后返回，不能覆盖新结果
+  const latest = useRef(0)
 
   const reload = useCallback(async () => {
+    const seq = ++latest.current
     setLoading(true)
     try {
-      setData(await api<T>(path))
+      const result = await api<T>(path)
+      if (seq !== latest.current) return
+      setData(result)
       setError(null)
     } catch (err) {
+      if (seq !== latest.current) return
       setError(errorCode(err))
     } finally {
-      setLoading(false)
+      if (seq === latest.current) setLoading(false)
     }
   }, [path])
 

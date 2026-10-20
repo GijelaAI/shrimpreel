@@ -13,10 +13,13 @@ An open-source template for "one photo → an AI video that follows a viral temp
 - Payments: Waffo Pancake (default) or Dodo Payments, both Merchants of Record. `mock` is for local dev and e2e only.
 - Video: fal.ai queue API (`mock` for local dev and e2e).
 - Included:
-  - Users and credits: Google sign-in (including One Tap), credit packs and a credit ledger, dashboard (videos, billing, settings, account deletion, data export).
+  - Users and credits: Google sign-in (including One Tap), credit packs and a credit ledger, dashboard (videos, billing, settings, account deletion, data export); billing shows amounts paid and refunded, orders and the ledger load page by page, and every order has a printable detail page (tax invoices come from the payment provider).
   - Orders and generation: partial and full refunds that claw back credits, a generation queue with a dead-letter queue, credits returned automatically on failure.
   - Growth: first- and last-touch attribution (UTM and ad click IDs), a visit → sign-up → checkout → paid → generate funnel, GA4 events behind a consent banner.
   - Admin: overview (including provider cost and gross margin), users, orders, generations, takedowns, contact messages, payment events, emails, audit log, reports and order CSV.
+    - Users: filter by status, role and paying, sort by sign-up, last login or credits; the detail page shows total paid, generation stats, orders, the credit ledger and admin actions on that user.
+    - Orders: search by order id, email or provider transaction id; the detail page merges payment webhooks, credit changes, admin actions and emails into one timeline, with refund and mark-paid actions.
+    - Generations: search by job id, email or provider request id.
   - Transactional email: credits added, video ready, generation failed and refunded, takedown receipts and outcomes; admins get new takedowns, deadline reminders and contact messages (Cloudflare Email Service, outbox with dedupe and retries).
   - Compliance and safety: AI-generated label on videos; photos deleted after 7 days and videos after 30; takedown requests on a 48-hour queue (every video made from the same source photo is removed and the photo is blocked); upload moderation; Turnstile on the contact and report forms.
   - Ops and security: health-check alert emails, browser error reporting to Workers Logs, CSP (Report-Only, per-request nonce) and Permissions-Policy.
@@ -270,7 +273,7 @@ E2E_PORT=3200 npm run test:e2e   # use another port when 3000 is taken
 npm run seo:check   # needs the dev server running; writes its report to .tmp/seo-check/
 ```
 
-e2e coverage (39 tests):
+e2e coverage (43 tests):
 - Purchase and generation: the full main path (including the Chinese site and the AI badge), failed payment, returning to the result page signed out (with the email stripped from the address bar), insufficient credits, refund on failed generation; three pollers handling the same job concurrently store it once without deleting the video, and the admin shows cost and margin.
 - Compliance:
   - Retention: photos used by in-progress jobs are kept; expired photos can't be reused; expired videos return 410 and show as expired in the dashboard; repeated cleanup is idempotent.
@@ -280,6 +283,7 @@ e2e coverage (39 tests):
 - Alerts and dead letters: a dead-lettered job is failed and refunded once; the health check raises failure-rate and dead-letter alerts and doesn't resend within the same bucket.
 - Transactional email: replayed payment webhooks send one email in the user's language; one email each for success and failure, none for a repeated failure; takedown receipt, one deadline and one overdue reminder, notifying the reporter and the creator after removal and no further reminders; contact messages only notify admins; account deletion clears the email log; the admin email page.
 - Payment events and refunds: concurrent and replayed payment events, refunds after partial use, two partial refunds, a late webhook with the same refund id after a manual record doesn't claw back twice.
+- Order and user data: billing and the order detail page show amounts paid and partial refunds; another user's order returns 404 from the API and "not found" on the page; the admin searches orders, an invalid refund amount is blocked and can be retried, and the timeline is complete after a partial refund and a mark-paid; users filter by paying and banned and sort by credits, and invalid sort values never reach SQL; a ledger longer than one page loads more without duplicates or gaps.
 - Security and permissions: CSRF, forged uploads and access to other users' data, admin permissions, credit adjustments and bans, dev login and mock payments only accepted from localhost; off-site `redirect` values after sign-in fall back to the dashboard, and unknown error codes on the sign-in page (such as `__proto__`) show the generic message.
 - Security headers: every inline script carries the request's nonce; zero CSP violations across public pages, a signed-in generation and the admin; an injected script without a nonce is reported; report endpoints aren't subject to the same-origin check.
 - Browser error reporting: global errors and unhandled rejections are reported once each without the query string, duplicates aren't re-sent, at most 5 per page; on a render error, the ID on the error page matches the report, and "Try again" recovers once the API is back.

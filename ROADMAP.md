@@ -1,12 +1,12 @@
 # ROADMAP
 
-## 当前状态（2026-10-20）
+## 当前状态（2026-10-21）
 
 本地全部可用。模板本身不部署上线（2026-10-20 决定），线上验证随第一个热词站进行。下文提到的 `.tmp/` 工件不入库，只在作者本机。
 
 - 已验证：
   - 检查与构建：`npm run typecheck`；`npm test`（85 个单元测试）；`npm run build`。
-  - e2e：`npm run test:e2e`（39 个用例全部通过）。
+  - e2e：`npm run test:e2e`（43 个用例全部通过，2026-10-21）。
   - SEO：`npm run seo:check`（20 个页面 0 error）。
 - 模板全面评审（2026-10-20）中不需要产品决策的 P0/P1 已在本地完成：
   - 工程：GitHub Actions CI（typecheck、单元测试、build，e2e 单独一个 job 并上传报告；Playwright 在 CI 重试 1 次）；README 改为 upstream remote 的多站升级流程。
@@ -43,6 +43,11 @@
     - Google ID token 校验了签名、`iss`、`aud`、`exp` 和 `email_verified`；
     - 邮件模板转义了用户输入；
     - 后处理容器不经 shell 调用 ffmpeg，输入有大小上限。
+- 订单与用户数据管理已在本地完成（2026-10-21），工件在 `.tmp/admin-data/`（只在作者本机）：
+  - 用户侧：账单显示实付和退款，订单与积分流水分页加载；新增订单详情页 `/dashboard/orders/:id`，可打印，他人订单返回 404。
+  - 后台：用户列表加付费、角色筛选和排序，详情页加累计付款、生成统计和审计；新增订单详情页（支付回调、积分、管理员操作、邮件合成时间线，可退款、补单）；订单和生成列表支持按支付商流水号、服务商请求 ID 搜索。
+  - 后台列表连续切换筛选时，先发出的请求后返回会覆盖新结果，已改为只采用最后一次请求。
+  - 迁移 `0007_admin_lookup.sql` 只加索引，部署前执行 `npm run db:migrate:remote`。
 - 成片后处理的技术验证已在本地完成，代码在 `containers/postprocess/`（ffmpeg 烧录水印、c2patool 写 C2PA、封面和 3 秒预览）：
   - Windows 原生 42 项检查通过，包括篡改检测、特殊字符水印、并发 503 和未配置证书时拒绝。
   - 性能和成本：720p 10 秒约 3.2 CPU 秒；每 1000 个任务 $0.13–0.41。
@@ -115,4 +120,5 @@
    - D1 定期导出到 R2 的 Workflow（Time Travel 已覆盖 30 天内恢复，这一项用于更长留存和跨账号灾备）。上线时确认使用 Workers Paid，否则 Time Travel 只有 7 天。
    - 错误追踪：前端错误目前只进 Workers Logs，堆栈是压缩后的行列号；需要 source map 还原或聚合告警时换成 Sentry。
    - `vt_attr` 归因 Cookie 不在同意横幅之后；主要面向欧盟用户时移到同意之后。
+   - 订单详情页提供发票下载：Dodo 可由服务端代理 `GET /invoices/payments/{payment_id}`（返回 PDF，每条记录每分钟限 5 次），未实测；Waffo 由支付商直接给买家发收据和发票，没有找到公开的下载接口，详情页继续提示查收邮件。
 4. P2（等有数据再定）：每篇文章单独的 og 图、视频 sitemap、`apple-touch-icon` 与 web manifest、海报改 webp/avif、公开页 SSR HTML 边缘缓存、全局每日生成上限、邮箱 magic link 登录、订阅与推荐奖励、营销邮件、后台 webhook 手动重放与复购 cohort。
