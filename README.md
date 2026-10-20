@@ -33,6 +33,7 @@ npm run seed:local                   # apply D1 migrations and upload seed/templ
 npm run dev -- --host 127.0.0.1      # http://127.0.0.1:3000
 ```
 
+- Use npm 11.19 or newer; `devEngines` in `package.json` warns on older versions. Running `npm install` with an older npm rewrites `package-lock.json` into a form that `npm ci` on CI rejects (`Missing: @emnapi/core@… from lock file`).
 - `PAYMENT_PROVIDER=mock` and `VIDEO_PROVIDER=mock` by default: buying opens a mock checkout and generating copies the template video. Nothing is charged.
 - Outside production the sign-in page has a "dev login" (`POST /api/auth/dev-login`); in production it returns 404. Dev login, mock payments and `/api/dev/*` only accept direct requests from localhost: anything that came through a tunnel or proxy (with `cf-connecting-ip`, `X-Forwarded-For` or similar headers) gets 404. Someone on your LAN can fake those conditions, so don't start the dev server with `--host 0.0.0.0` or expose it to the internet directly; for webhooks use `scripts/webhook-proxy.mjs` (see below).
 - `MODERATION_PROVIDER=mock` by default: an upload form with `mockOutcome=reject` simulates a rejected image. Leave `TURNSTILE_SITE_KEY` empty to disable Turnstile.

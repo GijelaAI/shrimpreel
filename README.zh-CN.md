@@ -33,6 +33,7 @@ npm run seed:local                   # 应用 D1 迁移 + 把 seed/templates/*.m
 npm run dev -- --host 127.0.0.1      # http://127.0.0.1:3000
 ```
 
+- npm 用 11.19 及以上，版本更低时 `package.json` 里的 `devEngines` 会给出警告。用旧版 npm 跑 `npm install` 会把 `package-lock.json` 改写成 CI 上 `npm ci` 不认的结构（报 `Missing: @emnapi/core@… from lock file`）。
 - 本地默认 `PAYMENT_PROVIDER=mock`、`VIDEO_PROVIDER=mock`：点购买会进入模拟收银台，生成会复制模板视频作为结果，不花钱。
 - 登录页在非 production 环境有“开发登录”（`POST /api/auth/dev-login`），production 返回 404。开发登录、mock 支付和 `/api/dev/*` 只接受本机直连：经过隧道或代理的请求（带 `cf-connecting-ip`、`X-Forwarded-For` 等头）一律返回 404。局域网里的人能伪造这些条件，所以不要用 `--host 0.0.0.0` 启动，也不要把 dev server 直接暴露到公网；联调 webhook 用 `scripts/webhook-proxy.mjs`（见下文）。
 - 本地默认 `MODERATION_PROVIDER=mock`：上传表单带 `mockOutcome=reject` 时模拟审核不通过。`TURNSTILE_SITE_KEY` 留空表示不启用人机验证。
