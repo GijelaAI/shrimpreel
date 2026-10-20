@@ -1,0 +1,47 @@
+{
+  "name": "shrimpreel",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "imports": {
+    "#/*": "./src/*"
+  },
+  "scripts": {
+    "dev": "vite dev --port 3000",
+    "build": "vite build",
+    "preview": "npm run build && wrangler dev --port 8787",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "seo:check": "node scripts/seo-check.mjs",
+    "seo:indexnow": "node scripts/indexnow.mjs",
+    "cf:types": "wrangler types --strict-vars=false",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "seed:local": "node scripts/seed-local.mjs",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/vite-plugin": "1.64.0",
+    "@tailwindcss/vite": "4.3.1",
+    "@tanstack/react-router": "1.170.45",
+    "@tanstack/react-start": "1.169.3",
+    "@tanstack/router-plugin": "1.168.47",
+    "hono": "4.13.13",
+    "lucide-react": "1.21.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "tailwindcss": "4.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.1",
+    "@types/node": "25.9.3",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "typescript": "6.0.3",
+    "vite": "8.3.4",
+    "vitest": "4.1.12",
+    "wrangler": "4.151.2"
+  }
+}

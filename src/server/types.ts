@@ -1,0 +1,117 @@
+export type UserRole = 'user' | 'admin'
+export type UserStatus = 'active' | 'banned' | 'deleted'
+
+export interface UserRow {
+  id: string
+  email: string
+  name: string | null
+  avatar_url: string | null
+  google_sub: string | null
+  role: UserRole
+  status: UserStatus
+  credits: number
+  locale: string | null
+  country: string | null
+  signup_source: string | null
+  signup_medium: string | null
+  signup_campaign: string | null
+  signup_device: string | null
+  attribution: string | null // JSON：first/last touch
+  created_at: string
+  last_login_at: string | null
+}
+
+export interface OrderRow {
+  id: string
+  user_id: string
+  provider: string
+  package_id: string
+  credits: number
+  amount_cents: number
+  currency: string
+  status: 'pending' | 'paid' | 'refunded' | 'failed' | 'canceled'
+  provider_session_id: string | null
+  provider_order_id: string | null
+  provider_payment_id: string | null
+  paid_amount: string | null
+  paid_currency: string | null
+  paid_amount_cents: number | null // 实收（最小单位，paid_currency）
+  refunded_amount_cents: number
+  refunded_credits: number
+  source: string | null
+  medium: string | null
+  campaign: string | null
+  country: string | null
+  device: string | null
+  attribution: string | null
+  created_at: string
+  paid_at: string | null
+  refunded_at: string | null
+  updated_at: string
+}
+
+export interface GenerationRow {
+  id: string
+  user_id: string
+  template_id: string
+  duration_id: string
+  duration_seconds: number
+  credits_cost: number
+  upload_id: string
+  status: 'queued' | 'processing' | 'succeeded' | 'failed'
+  provider: string
+  provider_request_id: string | null
+  provider_meta: string | null
+  output_r2_key: string | null
+  error_code: string | null
+  error_message: string | null
+  attempts: number
+  refunded: number
+  provider_cost_cents: number | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  updated_at: string
+  expired_at: string | null
+  removed_at: string | null
+}
+
+export interface UploadRow {
+  id: string
+  user_id: string
+  r2_key: string
+  content_type: string
+  size_bytes: number
+  sha256: string | null
+  created_at: string
+  expired_at: string | null
+}
+
+export interface TakedownRow {
+  id: string
+  reporter_name: string
+  reporter_email: string
+  reporter_user_id: string | null
+  content_ref: string
+  generation_id: string | null
+  reason: 'intimate' | 'impersonation' | 'minor' | 'copyright' | 'other'
+  details: string | null
+  is_depicted: number
+  status: 'open' | 'removed' | 'rejected'
+  due_at: string
+  resolved_at: string | null
+  resolved_by: string | null
+  resolution_note: string | null
+  locale: string | null // 举报人提交时的界面语言
+  reminder_stage: number // 0 未提醒，1 已提醒即将超时，2 已提醒超时
+  created_at: string
+}
+
+export type AppContext = {
+  Bindings: Env
+  Variables: {
+    user: UserRow | null
+  }
+}
+
+export type VideoJobMessage = { kind: 'submit' | 'poll'; generationId: string }

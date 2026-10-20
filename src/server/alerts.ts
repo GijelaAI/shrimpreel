@@ -1,0 +1,139 @@
+import { sendEmails } from './email'
+import type { TemplateParams } from './email-templates'
+import { adminAlerts } from './notifications'
+
+// 健康检查（Cron 每 5 分钟）：统计最近一段时间的异常，超过阈值就给 ADMIN_EMAILS 发告警邮件，同时写 console.error。
+// 同一类告警在同一个时间桶（ALERT_BUCKET_HOURS）里只发一次：dedupe_key 带桶号，由发件箱唯一约束保证，
+// Cron 重叠执行也不会重发；问题持续存在时下一个时间桶再提醒。发信本身出问题时，以 Workers 日志里的 [alert] 为准。
+
+export const ALERT_BUCKET_HOURS = 6
+
+// 不计入生成失败率的错误码：管理员手动判失败、举报下架都不是系统问题
+const EXCLUDED_FAILURES = ['admin_failed', 'content_removed']
+
+export const ALERT_RULES = {
+  // 最近 1 小时完成的任务里失败 ≥ 3 个且占比 ≥ 30%（零星失败、大流量下的个别失败不报）
+  generation_failures: { windowMinutes: 60, min: 3, minRate: 0.3 },
+  // 最近 1 小时有任务因队列消息重试耗尽被判失败（error_code = dead_letter）
+  dead_letter: { windowMinutes: 60, min: 1 },
+  // 创建超过 30 分钟仍未完成（jobs.ts 45 分钟时判超时退款）
+  job_backlog: { windowMinutes: 30, min: 1 },
+  // 最近 24 小时有处理失败、且之后没有重放成功的支付回调：用户可能付了款没到账
+  payment_webhook: { windowMinutes: 24 * 60, min: 1 },
+  // 最近 6 小时创建的邮件（不含告警邮件）里最终失败、或重试 ≥ 3 次仍未发出的 ≥ 3 封（完整重试约 3.3 小时）
+  email_failures: { windowMinutes: 6 * 60, min: 3 },
+} as const
+
+const EMAIL_STUCK_ATTEMPTS = 3
+
+export type AlertKind = keyof typeof ALERT_RULES
+export type Alert = TemplateParams['admin_alert']
+
+export interface HealthStats {
+  generations: { finished: number; failed: number; topErrors: string | null }
+  deadLetters: number
+  backlog: number
+  webhookFailures: { count: number; latest: string | null }
+  emailFailures: number
+}
+
+export function evaluateHealth(stats: HealthStats): Alert[] {
+  const alert = (kind: AlertKind, count: number, extra: Partial<Alert> = {}): Alert => ({
+    kind,
+    count,
+    total: null,
+    windowMinutes: ALERT_RULES[kind].windowMinutes,
+    detail: null,
+    ...extra,
+  })
+  const alerts: Alert[] = []
+  const { finished, failed, topErrors } = stats.generations
+  const rate = ALERT_RULES.generation_failures
+  if (failed >= rate.min && failed / finished >= rate.minRate) alerts.push(alert('generation_failures', failed, { total: finished, detail: topErrors }))
+  if (stats.deadLetters >= ALERT_RULES.dead_letter.min) alerts.push(alert('dead_letter', stats.deadLetters))
+  if (stats.backlog >= ALERT_RULES.job_backlog.min) alerts.push(alert('job_backlog', stats.backlog))
+  const webhooks = stats.webhookFailures
+  if (webhooks.count >= ALERT_RULES.payment_webhook.min) alerts.push(alert('payment_webhook', webhooks.count, { detail: webhooks.latest }))
+  if (stats.emailFailures >= ALERT_RULES.email_failures.min) alerts.push(alert('email_failures', stats.emailFailures))
+  return alerts
+}
+
+// 时间桶编号（UTC，可读）：例如 2026-10-20T06 表示 06:00–12:00
+export function alertBucket(now: number) {
+  const size = ALERT_BUCKET_HOURS * 3600_000
+  return new Date(Math.floor(now / size) * size).toISOString().slice(0, 13)
+}
+
+// since：只给本地 e2e 用，把各统计窗口的起点固定到测试开始时刻，不受之前运行留下的数据影响
+export async function collectHealthStats(env: Env, now: number, since?: string): Promise<HealthStats> {
+  const start = (kind: AlertKind) => since ?? new Date(now - ALERT_RULES[kind].windowMinutes * 60_000).toISOString()
+  const db = env.DB
+  const excluded = EXCLUDED_FAILURES.map(() => '?').join(', ')
+  // updated_at 不早于 completed_at，先用它走 (status, updated_at) 索引
+  const finishedSince = 'updated_at >= ? AND completed_at >= ?'
+  const genStart = start('generation_failures')
+  const deadStart = start('dead_letter')
+  const [finished, topErrors, deadLetters, backlog, webhooks, latestWebhook, emails] = await db.batch([
+    db
+      .prepare(
+        `SELECT COUNT(*) AS finished, COALESCE(SUM(status = 'failed'), 0) AS failed FROM generations
+         WHERE status IN ('succeeded', 'failed') AND ${finishedSince} AND COALESCE(error_code, '') NOT IN (${excluded})`,
+      )
+      .bind(genStart, genStart, ...EXCLUDED_FAILURES),
+    db
+      .prepare(
+        `SELECT error_code, COUNT(*) AS n FROM generations
+         WHERE status = 'failed' AND ${finishedSince} AND COALESCE(error_code, '') NOT IN (${excluded})
+         GROUP BY error_code ORDER BY n DESC LIMIT 3`,
+      )
+      .bind(genStart, genStart, ...EXCLUDED_FAILURES),
+    db
+      .prepare(`SELECT COUNT(*) AS n FROM generations WHERE status = 'failed' AND ${finishedSince} AND error_code = 'dead_letter'`)
+      .bind(deadStart, deadStart),
+    db
+      .prepare(`SELECT COUNT(*) AS n FROM generations WHERE status IN ('queued', 'processing') AND created_at < ?`)
+      .bind(new Date(now - ALERT_RULES.job_backlog.windowMinutes * 60_000).toISOString()),
+    db.prepare(`SELECT COUNT(*) AS n FROM payment_events WHERE status = 'failed' AND created_at >= ?`).bind(start('payment_webhook')),
+    db
+      .prepare(
+        `SELECT provider, event_type, error FROM payment_events WHERE status = 'failed' AND created_at >= ? ORDER BY created_at DESC LIMIT 1`,
+      )
+      .bind(start('payment_webhook')),
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM email_outbox WHERE created_at >= ? AND template != 'admin_alert'
+         AND (status = 'failed' OR (status = 'pending' AND attempts >= ?))`,
+      )
+      .bind(start('email_failures'), EMAIL_STUCK_ATTEMPTS),
+  ])
+  const n = (result: D1Result | undefined) => Number((result?.results[0] as { n?: number } | undefined)?.n ?? 0)
+  const generations = finished?.results[0] as { finished: number; failed: number } | undefined
+  const errors = (topErrors?.results ?? []) as Array<{ error_code: string | null; n: number }>
+  const latest = latestWebhook?.results[0] as { provider: string; event_type: string; error: string | null } | undefined
+  return {
+    generations: {
+      finished: Number(generations?.finished ?? 0),
+      failed: Number(generations?.failed ?? 0),
+      topErrors: errors.length ? errors.map((e) => `${e.error_code ?? 'unknown'} ×${e.n}`).join(', ') : null,
+    },
+    deadLetters: n(deadLetters),
+    backlog: n(backlog),
+    webhookFailures: {
+      count: n(webhooks),
+      latest: latest ? `${latest.provider} ${latest.event_type}: ${latest.error ?? ''}`.slice(0, 300) : null,
+    },
+    emailFailures: n(emails),
+  }
+}
+
+export async function runHealthCheck(env: Env, options: { now?: number; since?: string } = {}) {
+  const now = options.now ?? Date.now()
+  const stats = await collectHealthStats(env, now, options.since)
+  const alerts = evaluateHealth(stats)
+  const bucket = alertBucket(now)
+  for (const alert of alerts) {
+    console.error('[alert]', JSON.stringify(alert))
+    await sendEmails(env, adminAlerts(env, `admin_alert:${alert.kind}:${bucket}`, () => ({ template: 'admin_alert', params: alert })))
+  }
+  return { stats, alerts, bucket }
+}

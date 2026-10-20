@@ -1,0 +1,152 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/* 颜色全部走 CSS 变量：换站时改这里的几行即可换肤 */
+:root {
+  --bg: #f7f4ee;
+  --bg-soft: #efe9df;
+  --card: #fffdf9;
+  --fg: #1d1a16;
+  --muted: #6d665c;
+  --line: #e4ddd1;
+  --ink: #1d1a16;
+  --ink-fg: #fbf8f2;
+  --accent: #e0306f;
+  /* 小号强调文字用：对 --bg 的对比度需 ≥ 4.5:1（WCAG AA），--accent 只适合图标、大字和背景 */
+  --accent-text: #c41f5c;
+  --accent-2: #00b8d9;
+  --glow: rgba(224, 48, 111, 0.12);
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --bg: #12110f;
+  --bg-soft: #1b1916;
+  --card: #1c1a17;
+  --fg: #f2ede4;
+  --muted: #a39b8f;
+  --line: #2f2b26;
+  --ink: #f2ede4;
+  --ink-fg: #12110f;
+  --accent: #ff4f8b;
+  --accent-text: #ff4f8b;
+  --accent-2: #2fd6f5;
+  --glow: rgba(255, 79, 139, 0.14);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-soft: var(--bg-soft);
+  --color-card: var(--card);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-fg: var(--ink-fg);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-2: var(--accent-2);
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, 'Songti SC', 'STSong', serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html {
+    background: var(--bg);
+    color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+    scroll-behavior: smooth;
+  }
+  body {
+    font-family: var(--font-sans);
+    min-height: 100vh;
+  }
+  ::selection {
+    background: var(--accent);
+    color: white;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+@layer components {
+  .container-page {
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }
+  .eyebrow {
+    @apply text-xs font-medium tracking-[0.28em] uppercase;
+  }
+  /* Tailwind 4 的 @apply 不能引用自定义类，按钮基础样式用并列选择器共享；放在 components 层，页面上的 px-3 等工具类可覆盖 */
+  .btn,
+  .btn-primary,
+  .btn-ghost,
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-ink text-ink-fg hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply border border-line bg-card text-fg hover:bg-bg-soft;
+  }
+  .btn-danger {
+    @apply bg-red-600 text-white hover:bg-red-700;
+  }
+  .card {
+    @apply rounded-2xl border border-line bg-card;
+  }
+  .input {
+    @apply w-full rounded-xl border border-line bg-card px-3.5 py-2.5 text-sm text-fg outline-none placeholder:text-muted focus:border-fg;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-card px-3.5 py-1.5 text-sm;
+  }
+  .prose-article h2 {
+    @apply mt-10 mb-3 font-display text-2xl;
+  }
+  .prose-article p,
+  .prose-article li {
+    @apply leading-7 text-fg/85;
+  }
+  .prose-article p {
+    @apply my-4;
+  }
+  .prose-article ul,
+  .prose-article ol {
+    @apply my-4 space-y-2 pl-5;
+  }
+  .prose-article ul {
+    @apply list-disc;
+  }
+  .prose-article ol {
+    @apply list-decimal;
+  }
+  .table-admin {
+    @apply w-full text-left text-sm;
+  }
+  .table-admin th {
+    @apply border-b border-line px-3 py-2 text-xs font-medium tracking-wide text-muted uppercase;
+  }
+  .table-admin td {
+    @apply border-b border-line px-3 py-2 align-top;
+  }
+}
+
+.hero-glow {
+  background: radial-gradient(60% 50% at 70% 30%, var(--glow), transparent 70%);
+}
+
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
