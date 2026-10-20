@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # 两个 job 都固定 ubuntu-24.04：ubuntu-latest 正在迁往 Ubuntu 26.04，Playwright 1.59 不支持，见 ROADMAP“已知问题”
+    runs-on: ubuntu-24.04
     steps:
       # 工作流不需要 git push：checkout 后不保留 GITHUB_TOKEN，npm 依赖的安装脚本和测试代码就拿不到它
       - uses: actions/checkout@v7
@@ -30,7 +31,7 @@ jobs:
       - run: npm run build
 
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: check
     timeout-minutes: 30
     steps:

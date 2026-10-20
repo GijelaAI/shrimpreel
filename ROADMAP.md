@@ -84,6 +84,7 @@
 
 - 本地 dev 下，miniflare 5 beta 在 Worker 不读完请求体就返回时，会让同一连接上的下一个请求出错。`src/server.ts` 里的 `drainUnreadBody` 是仅 dev 生效的规避代码。升级 `@cloudflare/vite-plugin` 后可以尝试去掉，再跑 e2e 的 CSRF 用例确认。
 - e2e 偶发 `page.goto: net::ERR_ABORTED`：2026-10-20 全量跑出现过 1 次（25/27），之后的全量运行没有复现，根因未查明。已排除两个怀疑点：加载后的第二次导航来自 TanStack history 初始化时的 `replaceState`，视频请求被中止是 `preload="metadata"` 的正常行为。CI 里 Playwright 重试 1 次并保留 trace。
+- CI 固定在 `ubuntu-24.04`：`ubuntu-latest` 从 2026-10 起迁往 Ubuntu 26.04，而 Playwright 1.59 不支持它（`playwright install` 报 `does not support chromium on ubuntu26.04-x64`）。升级到支持 26.04 的 Playwright（1.64 已支持）并跑通 e2e 后，把两个 job 改回 `ubuntu-latest`。
 - 用隧道联调时，支付商后台的 test webhook 指向临时地址，隧道失效后要更新 URL（Dodo 用 `dodo-setup.mjs --webhook-id`）。
 - Dodo 收银台显示的商户名取自注册信息，上 live 前在 Dodo 后台改成品牌名。
 - Dodo 回跳 URL 带买家邮箱（`?email=`）。GA4 已过滤，结果页加载后也会从地址栏去掉；但 Worker 访问日志里第一次请求的 URL 仍带邮箱。
