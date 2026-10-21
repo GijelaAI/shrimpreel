@@ -236,6 +236,11 @@
 - 测试：e2e `share.spec.ts` 2 个；单元测试 `backup.test.ts`、`chat-notify.test.ts`、`attribution-consent.test.ts`。工件在 `.tmp/security-fixes/` 和 `.tmp/restore-d1/`。
 - 未验证：见上文“未验证”的分享、备份、付款通知三条。
 
+**宣传视频**（2026-10-22）
+
+- `docs/media/shrimpreel-promo-{en,zh}.mp4`（72 秒，1080p，无声）和封面图，README 两份顶部嵌入。画面是本地 dev 环境的真实截图（mock 支付和 mock 视频服务商造的演示数据），示例站和素材是占位演示。
+- 界面或功能有大改时重录。`docs/` 属于共用层，视频会随模板合并进各热词站仓库；站点不需要时可以删掉。
+
 ## 下一步
 
 按上面的“模板增强计划”推进（第一、二、三批已完成，剩 P2 按需项）。其余事项按 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 的“建议顺序”推进：

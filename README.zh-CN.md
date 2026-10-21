@@ -6,6 +6,10 @@
 
 开源的“一张照片 → 跟拍某个爆款视频模板”AI 视频 SaaS 模板。每追一个新热词就建一个站：从本模板建仓库，改配置、文案和素材即可上线。全部跑在 Cloudflare 上：Workers + D1 + R2 + KV + Queues + Rate Limiting + Cron。
 
+[![ShrimpReel 宣传视频：落地页、生成、收款、分享页、后台、合规与技术栈](docs/media/shrimpreel-promo-zh.jpg)](docs/media/shrimpreel-promo-zh.mp4)
+
+[观看 72 秒功能介绍](docs/media/shrimpreel-promo-zh.mp4)（MP4，无声；[英文版](docs/media/shrimpreel-promo-en.mp4)）。画面来自本地运行，示例站 Neon Shuffle AI 和视频素材都是占位演示。
+
 > 状态：本地全流程可用（单元测试 + Playwright e2e），尚未作为正式站点部署。哪些已用真实服务验证、哪些还没有，见 [ROADMAP.md](ROADMAP.md)。
 
 - 前端/SSR：TanStack Start（React 19）+ Tailwind 4，`/` 英文、`/zh` 中文
