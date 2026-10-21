@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
-import { normalizeDodoEvent, verifyDodoWebhook } from '#/server/payments/dodo'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createDodoProvider, normalizeDodoEvent, verifyDodoWebhook } from '#/server/payments/dodo'
 
 const NOW = Date.UTC(2026, 9, 20, 8, 0, 0)
 const rawKey = randomBytes(24)
@@ -76,6 +76,20 @@ describe('normalizeDodoEvent', () => {
       paidAmount: '9.90',
       paidAmountCents: 990,
     })
+    expect(paid).toMatchObject({ productId: null, discounted: false, site: null })
+    const detailed = normalizeDodoEvent({
+      __webhookId: 'msg_2',
+      type: 'payment.succeeded',
+      data: {
+        payment_id: 'pay_2',
+        total_amount: 800,
+        currency: 'USD',
+        product_cart: [{ product_id: 'pdt_starter', quantity: 1 }],
+        discount_id: 'dsc_1',
+        metadata: { orderId: 'ord_2', site: 'example.com' },
+      },
+    })
+    expect(detailed).toMatchObject({ productId: 'pdt_starter', discounted: true, site: 'example.com' })
     expect(normalizeDodoEvent({ __webhookId: 'm', type: 'payment.cancelled', data: { metadata: { orderId: 'ord_1' } } }).kind).toBe('failed')
     expect(normalizeDodoEvent({ __webhookId: 'm', type: 'refund.succeeded', data: { payment_id: 'pay_1' } })).toMatchObject({
       kind: 'refunded',
@@ -91,5 +105,70 @@ describe('normalizeDodoEvent', () => {
       }),
     ).toMatchObject({ refundId: 'ref_1', refundAmountCents: 400 })
     expect(normalizeDodoEvent({ __webhookId: 'm', type: 'subscription.active' }).kind).toBe('ignored')
+  })
+})
+
+describe('createDodoProvider.fetchPaidEvent', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const env = { DODO_API_KEY: 'sk_test', DODO_ENVIRONMENT: 'test_mode' } as unknown as Env
+
+  it('checkout session 成功后取 Payment 对象，按 payment.succeeded 同样的规则归一化', async () => {
+    const paths: string[] = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      expect(new Headers(init.headers).get('authorization')).toBe('Bearer sk_test')
+      const path = new URL(url).pathname
+      paths.push(path)
+      if (path === '/checkouts/cks_1') return Response.json({ id: 'cks_1', payment_id: 'pay_1', payment_status: 'succeeded' })
+      return Response.json({
+        payment_id: 'pay_1',
+        checkout_session_id: 'cks_1',
+        status: 'succeeded',
+        total_amount: 1069,
+        currency: 'USD',
+        metadata: { orderId: 'ord_1', site: 'example.com' },
+        product_cart: [{ product_id: 'pdt_starter', quantity: 1 }],
+        discount_id: null,
+      })
+    })
+    const found = await createDodoProvider(env).fetchPaidEvent!({ id: 'ord_1', packageId: 'starter', providerSessionId: 'cks_1' })
+    expect(paths).toEqual(['/checkouts/cks_1', '/payments/pay_1'])
+    expect(found?.event).toEqual({
+      kind: 'paid',
+      eventId: 'reconcile:pay_1',
+      eventType: 'reconcile',
+      orderId: 'ord_1',
+      providerOrderId: 'cks_1',
+      providerPaymentId: 'pay_1',
+      paidAmount: '10.69',
+      paidCurrency: 'USD',
+      paidAmountCents: 1069,
+      productId: 'pdt_starter',
+      discounted: false,
+      site: 'example.com',
+      subscription: null,
+    })
+  })
+
+  it('未付款、处理中、session 不存在、订单没有 session id 时返回 null；接口出错时抛出', async () => {
+    let session: Response | null = null
+    const fetchSpy = vi.fn(async () => session!.clone())
+    vi.stubGlobal('fetch', fetchSpy)
+    const provider = createDodoProvider(env)
+    expect(await provider.fetchPaidEvent!({ id: 'ord_1', packageId: 'starter', providerSessionId: null })).toBeNull()
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    for (const reply of [
+      Response.json({ id: 'cks_1', payment_id: null, payment_status: null }),
+      Response.json({ id: 'cks_1', payment_id: 'pay_1', payment_status: 'processing' }),
+      Response.json({ id: 'cks_1', payment_id: 'pay_1', payment_status: 'failed' }),
+      new Response('not found', { status: 404 }),
+    ]) {
+      session = reply
+      expect(await provider.fetchPaidEvent!({ id: 'ord_1', packageId: 'starter', providerSessionId: 'cks_1' })).toBeNull()
+    }
+    expect(fetchSpy).toHaveBeenCalledTimes(4)
+
+    session = new Response('oops', { status: 500 })
+    await expect(provider.fetchPaidEvent!({ id: 'ord_1', packageId: 'starter', providerSessionId: 'cks_1' })).rejects.toMatchObject({ status: 502 })
   })
 })

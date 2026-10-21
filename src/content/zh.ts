@@ -6,6 +6,8 @@ type S = typeof Site
 
 export function zh(s: S): Content {
   const k = s.keyword
+  // 是否在卖订阅（site.subscriptionsEnabled 且有套餐），决定订阅相关文案是否出现
+  const subs = s.subscriptionsEnabled && s.plans.length > 0
   const b = s.brandName
   const { uploadDays, outputDays } = s.retention
   const photoRetention = uploadDays > 0 ? `在上传 ${uploadDays} 天后自动删除` : '保留到你主动删除为止'
@@ -14,16 +16,18 @@ export function zh(s: S): Content {
   return {
     meta: {
       homeTitle: `${k} AI 视频生成器：一张照片生成同款视频`,
-      homeDescription: `上传一张照片，几分钟内生成你主演的 ${k} 视频。原版舞步与机位不变，主角换成你。按秒计费，积分永不过期。`,
+      homeDescription: `上传一张照片，几分钟内生成你主演的 ${k} 视频。原版舞步与机位不变，主角换成你。${subs ? '按秒计费，可单次购买积分，也可按月订阅。' : '按秒计费，积分永不过期。'}`,
       pricingTitle: `价格 – ${b}`,
-      pricingDescription: `${k} AI 视频积分包：一次购买，永不过期，生成失败自动退还积分。`,
+      pricingDescription: subs
+        ? `${k} AI 视频积分包与月付、年付订阅：按秒计费，积分包永不过期，订阅随时可取消；生成失败自动退还积分。`
+        : `${k} AI 视频积分包：按秒计费，一次购买，积分永不过期；生成失败自动退还积分，未使用的积分包 14 天内可退款。`,
       contactTitle: `联系我们 – ${b}`,
       contactDescription: `关于账单、退款、视频生成失败或商务合作的问题，请联系 ${b} 团队，我们通常在一个工作日内回复。`,
       signInTitle: `登录 – ${b}`,
       dashboardTitle: `我的视频 – ${b}`,
-      privacyDescription: `${b} 如何收集、使用和保护你上传的照片、生成的 ${k} 视频以及账户数据。`,
-      termsDescription: `使用 ${b} 制作 ${k} AI 视频的规则：授权同意、可接受的用途、积分与责任限制。`,
-      refundDescription: `${b} 在什么情况下退还积分或积分包费用，以及退款到账需要多久。`,
+      privacyDescription: `${b} 如何收集、使用、保存和保护你上传的照片、生成的 ${k} 视频以及账户数据，以及你如何删除它们。`,
+      termsDescription: `使用 ${b} 制作 ${k} AI 视频的规则：照片的授权同意、可接受的用途、积分与退款，以及责任限制。`,
+      refundDescription: `${b} 在什么情况下退还积分或积分包费用、生成失败的积分如何自动退回，以及退款到账需要多久。`,
       reportTitle: `举报内容 – ${b}`,
       reportDescription: `如果 ${b} 生成的视频未经同意使用了你的形象、涉及未成年人或侵犯你的权利，请在此举报，我们会在 ${s.takedownSlaHours} 小时内处理。`,
       ogImageAlt: `${b}：一张照片生成你的 ${k} 视频`,
@@ -95,6 +99,27 @@ export function zh(s: S): Content {
       photoLabel: '上传的照片',
       resultLabel: '生成的视频',
     },
+    problem: {
+      eyebrow: '难点',
+      title: `想跟上 ${k}，比看起来难`,
+      items: [
+        { title: '得先把舞步练会', body: '一个动作一个动作地抠要花不少时间，镜头一开还是容易紧张。' },
+        { title: '得有人帮你拍', body: '要找朋友或者架三脚架，还得有一面和原片构图差不多的背景。' },
+        { title: '节奏差一点就穿帮', body: '慢半拍和原片放在一起很明显，只能一遍遍重拍。' },
+      ],
+    },
+    withWithout: {
+      eyebrow: '对比',
+      title: `自己拍 vs 用 ${b}`,
+      without: '自己拍',
+      with: `用 ${b}`,
+      rows: [
+        { without: '先把舞步练会', with: '不用会跳，一张照片就够' },
+        { without: '找人帮拍或架三脚架', with: '不用架设备' },
+        { without: '反复重拍，直到卡上节奏', with: '节奏跟随原片' },
+        { without: '在手机上剪辑、导出', with: '直接下载成片 MP4' },
+      ],
+    },
     howTo: {
       eyebrow: '使用方法',
       title: `三步制作 ${k} AI 视频`,
@@ -124,7 +149,7 @@ export function zh(s: S): Content {
         { title: '竖屏直接发布', body: `按 ${s.template.aspectRatio} 导出，可直接发到抖音、Reels、Shorts 或 ${s.trendPlatform}。` },
         { title: '时长自由选', body: '可以只做开头的高光片段，也可以做完整版，按实际秒数付费。' },
         { title: '默认私密', body: `上传的照片私密存储，只用于你的视频生成，并${photoRetention}。` },
-        { title: '计费透明', body: '积分永不过期；生成失败时积分会自动退回余额。' },
+        { title: '计费透明', body: subs ? '积分包永不过期，订阅随时可取消；生成失败时积分会自动退回余额。' : '积分永不过期；生成失败时积分会自动退回余额。' },
       ],
     },
     ideas: {
@@ -139,9 +164,11 @@ export function zh(s: S): Content {
     },
     pricing: {
       eyebrow: '价格',
-      title: '一次购买，随时使用',
-      subtitle: '1 积分 = 1 秒视频。无订阅，不过期。',
+      title: subs ? '按需购买，或者订阅' : '一次购买，随时使用',
+      subtitle: subs ? '1 积分 = 1 秒视频。可以买永不过期的积分包，也可以订阅、每月领取新积分。' : '1 积分 = 1 秒视频。无订阅，不过期。',
       popular: '最受欢迎',
+      was: '原价',
+      save: (percent: number) => `省 ${percent}%`,
       buy: '购买积分',
       buying: '正在打开支付页…',
       credits: (n: number) => `${n} 积分`,
@@ -154,6 +181,20 @@ export function zh(s: S): Content {
         party: { name: '派对包', tagline: '和朋友一起玩' },
         squad: { name: '团队包', tagline: '适合创作者与团队' },
       } as Record<string, { name: string; tagline: string }>,
+      plansTitle: '订阅',
+      plansBody: '订阅期内每个月初发放积分，当月结束时作废。随时可以取消，当期结束前仍可正常使用。',
+      packsTitle: '积分包',
+      perMonth: '/ 月',
+      perYear: '/ 年',
+      monthlyCredits: (n: number) => `每月 ${n} 积分`,
+      yearlyMonthly: (price: string) => `折合每月 ${price}，按年付费`,
+      subscribe: '订阅',
+      planBullets: ['每月发放新积分', '支持全部时长', '高清 MP4 下载，无水印', '随时取消'],
+      plans: {
+        monthly: { name: '月付', tagline: '灵活，随时取消' },
+        yearly: { name: '年付', tagline: '常用更划算' },
+      } as Record<string, { name: string; tagline: string }>,
+      renewalNote: '订阅按显示的价格自动续费，直到你取消。当月未用完的订阅积分不会累积到下月。',
     },
     faq: {
       title: '常见问题',
@@ -171,7 +212,15 @@ export function zh(s: S): Content {
           guide: { article: 'howTo', label: `让 ${k} AI 视频更好看的拍照技巧` },
         },
         { q: '生成需要多久？', a: '大多数视频在 2–8 分钟内完成，取决于时长和排队情况。可以关闭页面，完成后在“我的视频”查看。' },
-        { q: '积分怎么计算？', a: '每秒视频消耗 1 积分。积分按包购买，永不过期；生成失败会自动退回。' },
+        {
+          q: '积分怎么计算？',
+          a: subs
+            ? '每秒视频消耗 1 积分。积分包的积分永不过期；订阅积分每月发放，当月结束时作废。生成时先扣快到期的积分，生成失败会自动退回。'
+            : '每秒视频消耗 1 积分。积分按包购买，永不过期；生成失败会自动退回。',
+        },
+        ...(subs
+          ? [{ q: '怎么取消订阅？', a: '进入“我的账户 → 账单”，点击“取消续费”。之后不会再扣款，当期结束前套餐和积分仍可正常使用。' }]
+          : []),
         { q: '可以用别人的照片吗？', a: '必须获得本人许可，且禁止使用未成年人、明星或公众人物的照片。违规账号将被关闭。' },
         { q: '我的照片会怎么处理？', a: `上传内容私密保存，只用于生成你的视频，并${photoRetention}；成片${videoRetention}。注销账号会立即删除全部内容。` },
       ],
@@ -232,6 +281,8 @@ export function zh(s: S): Content {
       ledger: '积分明细',
       noOrders: '暂无订单。',
       noLedger: '暂无积分变动。',
+      expiring: (credits: number, date: string) => `${credits} 积分将于 ${date} 到期。`,
+      expiringHint: '生成时会先扣快到期的积分。',
       columns: { date: '日期', pack: '套餐', amount: '金额', status: '状态', change: '变动', reason: '原因' },
       orderStatus: { pending: '待支付', paid: '已支付', partially_refunded: '部分退款', failed: '失败', refunded: '已退款', canceled: '已取消' } as Record<string, string>,
       refundedLine: (amount: string, credits: number) => `已退 ${amount} · ${credits} 积分`,
@@ -263,9 +314,30 @@ export function zh(s: S): Content {
         generation_refund: '生成失败退回',
         order_refund: '订单退款',
         admin_adjust: '客服调整',
+        expire: '积分到期',
+        redeem: '兑换码',
+        referral: '邀请奖励',
+        referral_refund: '邀请奖励撤回（订单退款）',
         signup_bonus: '注册赠送',
         account_deleted: '账号注销',
+        subscription: '订阅积分',
       } as Record<string, string>,
+      subscription: {
+        title: '订阅',
+        status: { active: '生效中', past_due: '扣款失败', canceled: '已取消', expired: '已结束' } as Record<string, string>,
+        monthlyCredits: (n: number) => `每月 ${n} 积分`,
+        renewsOn: (date: string, price: string) => `将于 ${date} 自动续费 ${price}。`,
+        endsOn: (date: string) => `已取消续费。套餐在 ${date} 前仍然有效，之后不会再扣款。`,
+        ended: (date: string) => `已于 ${date} 结束。`,
+        nextGrant: (date: string) => `下次发放积分：${date}。`,
+        pastDue: '续费扣款失败。请更新付款方式以保留套餐，支付商会自动重试扣款。',
+        cancel: '取消续费',
+        confirmCancel: '确定取消续费？当期结束前套餐和积分仍可正常使用。',
+        resume: '继续订阅',
+        resumeInPortal: '改主意了？在“管理付款”里可以恢复订阅。',
+        portal: '管理付款',
+        seePlans: '查看套餐',
+      },
     },
     settings: {
       profile: '个人资料',
@@ -279,6 +351,15 @@ export function zh(s: S): Content {
       dangerBody: '将删除你上传的照片和生成的视频，并在所有设备退出登录。剩余积分作废；订单记录按财务要求保留。',
       confirmLabel: '输入 DELETE 确认',
       deleteButton: '注销我的账号',
+      redeemTitle: '兑换码',
+      redeemBody: '有活动码或礼品码？输入后积分会加到你的账户。每个账号每个码只能兑换一次。',
+      redeemButton: '兑换',
+      redeemSuccess: (credits: number, expires: string | null) => `已到账 ${credits} 积分${expires ? `，有效期至 ${expires}` : ''}。`,
+      referralTitle: '邀请好友',
+      referralBody: (credits: number) => `分享你的邀请链接。好友通过链接注册并完成首次购买后，你获得 ${credits} 积分；这笔订单退款时奖励会收回。`,
+      referralCopy: '复制链接',
+      referralCopied: '已复制',
+      referralStats: (invited: number, rewarded: number, credits: number) => `已注册 ${invited} 人 · 已购买 ${rewarded} 人 · 获得 ${credits} 积分`,
     },
     checkout: {
       successTitle: '支付成功',
@@ -343,6 +424,7 @@ export function zh(s: S): Content {
       lastUpdated: '最后更新',
       aiGenerated: 'AI 生成',
       breadcrumb: '面包屑导航',
+      maintenance: '系统维护中，暂停生成新视频和购买，稍后恢复。已有的视频和积分不受影响。',
     },
     guides: {
       nav: '指南',
@@ -355,7 +437,12 @@ export function zh(s: S): Content {
     errors: {
       unauthorized: '请先登录。',
       insufficient_credits: '积分不足以生成该时长。',
+      invalid_code: '兑换码无效或已过期。',
+      code_used_up: '这个兑换码已被领完。',
+      already_redeemed: '你已经兑换过这个码了。',
       too_many_active_jobs: '你已有 3 个视频在生成中，请等待完成后再试。',
+      maintenance: '系统维护中，请稍后再试。',
+      daily_limit: '今天的生成名额已满，请明天再试，本次没有扣积分。',
       rate_limited: '请求过于频繁，请稍后再试。',
       file_too_large: '文件超过 10 MB。',
       unsupported_file_type: '请上传 JPG、PNG 或 WebP 图片。',
@@ -378,13 +465,19 @@ export function zh(s: S): Content {
       captcha_unavailable: '验证服务暂不可用，请重试。',
       captcha_not_configured: `验证暂不可用，请改为发送邮件至 ${s.supportEmail}。`,
       media_expired: '该视频已过期并被删除。',
+      subscription_exists: '你已有生效中的订阅，可在“我的账户 → 账单”管理。',
+      subscription_active: '注销账号前，请先在“账单”页取消订阅续费。',
+      subscription_not_found: '没有找到生效中的订阅。',
+      subscription_resume_in_portal: '请在“管理付款”里恢复订阅。',
+      subscription_portal_unsupported: '这个订阅暂不支持在线管理付款，请联系客服。',
+      subscription_cancel_unsupported: '这个订阅无法在这里取消，请联系客服。',
       media_removed: '该视频因举报已被下架。',
       invalid_report: '请填写所有必填项并勾选声明。',
       not_found: '没有找到对应内容，可能不属于当前账号。',
       internal_error: '发生意外错误，请重试。',
     } as Record<string, string>,
     legal: {
-      updated: '2026-10-20',
+      updated: '2026-10-21',
       privacy: {
         title: '隐私政策',
         sections: [
@@ -397,6 +490,9 @@ export function zh(s: S): Content {
             p: [
               '网站使用少量运行所必需的 Cookie 和浏览器存储，例如登录会话、你选择的浅色或深色主题。',
               '我们还会写入一个第一方 Cookie（vt_attr，保留 90 天），记录你第一次和最近一次是从哪里来到本站的，例如来源网站或推广链接。它只用于了解哪些渠道带来了注册和购买，不会提供给广告网络。',
+              s.referralRewardCredits > 0
+                ? '如果你打开了好友的邀请链接，我们会写入一个 Cookie（vt_ref，最多保留 30 天，注册后即删除），用于记录这次邀请。为防止滥用邀请奖励，邀请记录里保存的是你的 IP 地址加盐后的哈希值，不保存 IP 地址本身。邀请双方都看不到对方的账户信息。'
+                : '',
               ga4Id || cfBeaconToken ? '' : '我们不使用第三方统计或广告 Cookie。',
               cfBeaconToken ? '我们用 Cloudflare Web Analytics 统计页面浏览量，它不使用 Cookie，也不会跨网站追踪你。' : '',
               ga4Id
@@ -415,7 +511,15 @@ export function zh(s: S): Content {
           { h: '内容与授权', p: ['只能上传你本人或已获得许可的成年人的照片。禁止上传未成年人、明星或公众人物的照片，禁止利用本服务骚扰、冒充或欺骗他人。我们有权删除违规内容并关闭相关账号。'] },
           { h: '生成的视频', p: ['你可以将生成的视频用于个人和社交媒体用途。AI 输出可能存在瑕疵，分享前请先检查。视频带有“AI 生成”标识：分享时请保留标识并注明为 AI 生成，不得冒充真实事件的录像。'] },
           { h: '举报与下架', p: [`任何人都可以通过举报页面提交举报。我们会在 ${s.takedownSlaHours} 小时内审核，并下架违反本条款或侵犯他人权利的内容；被下架的照片将无法再次上传。严重或多次违规的账号可能被关闭，已使用的积分不予退还。`] },
-          { h: '积分与支付', p: ['积分以一次性套餐出售，不可兑换现金，在服务运营期间不会过期。支付由作为记录商户的合作方处理，其条款同样适用。'] },
+          {
+            h: '积分与支付',
+            p: [
+              '积分包为一次性购买。积分不可兑换现金，积分包的积分在服务运营期间不会过期。支付由作为记录商户的合作方处理，其条款同样适用。',
+              subs
+                ? '订阅在每个计费周期（月或年）结束时按你订阅时的价格自动续费，直到你取消。你可以随时在账户的“账单”页取消，取消在当期结束时生效，当期结束前套餐仍然有效。订阅积分每月发放一次（年付按月分次发放），当月结束时作废，不累积到下月。'
+                : '',
+            ].filter(Boolean),
+          },
           { h: '可用性与责任', p: ['我们尽力保证服务可用，但按“现状”提供。在法律允许的范围内，我们的责任以你在索赔前 12 个月内支付的金额为限。'] },
           { h: '条款变更', p: ['我们可能更新本条款。更新后继续使用即表示你接受新条款。'] },
         ],
@@ -425,6 +529,17 @@ export function zh(s: S): Content {
         sections: [
           { h: '生成失败', p: ['视频生成失败时，积分会自动退回你的余额，无需任何操作。'] },
           { h: '未使用的积分', p: [`购买后 14 天内且积分包未被使用，可申请退款。请发送邮件至 ${s.supportEmail} 并附上订单号。`] },
+          ...(subs
+            ? [
+                {
+                  h: '订阅',
+                  p: [
+                    `订阅扣款后 14 天内且这笔扣款发放的积分未被使用，可申请退款。请发送邮件至 ${s.supportEmail} 并附上账单页的订单号。退款后这笔扣款发放的积分会被收回。`,
+                    '取消订阅会停止之后的续费，当期费用不会自动退还，当期结束前套餐仍然有效。',
+                  ],
+                },
+              ]
+            : []),
           { h: '质量问题', p: ['如果成片明显损坏（例如文件损坏或人脸缺失），请带上视频 ID 联系我们，审核后会退还对应积分。'] },
           { h: '退款方式', p: ['审核通过的退款将经由支付合作方原路退回，到账可能需要 5–10 个工作日。'] },
         ],

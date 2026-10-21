@@ -8,6 +8,9 @@ import { isSeoPath } from './server/seo'
 import { isProduction } from './server/util'
 import type { VideoJobMessage } from './server/types'
 
+// mock 收银台页面（/checkout/mock、/zh/checkout/mock）：生产环境它调用的接口都是 404，页面本身也不该能打开
+const MOCK_CHECKOUT_PAGE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?checkout\/mock$/i
+
 const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
@@ -19,11 +22,14 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url)
     const { pathname } = url
-    const toHono = pathname.startsWith('/api/') || pathname.startsWith('/media/') || isSeoPath(pathname)
+    const toHono = pathname.startsWith('/api/') || pathname.startsWith('/media/') || pathname.startsWith('/i/') || isSeoPath(pathname)
     // 页面统一无尾斜杠：/pricing/ → 301 /pricing（TanStack 默认 307，不传递权重）
     if (!toHono && pathname.length > 1 && pathname.endsWith('/') && (request.method === 'GET' || request.method === 'HEAD')) {
       url.pathname = pathname.replace(/\/+$/, '') || '/'
       return withSecurityHeaders(Response.redirect(url.toString(), 301), env, url)
+    }
+    if (isProduction(env) && MOCK_CHECKOUT_PAGE.test(pathname)) {
+      return withSecurityHeaders(new Response('Not found', { status: 404, headers: { 'X-Robots-Tag': 'noindex' } }), env, url)
     }
     // 页面请求生成 CSP nonce，经请求上下文交给 router（src/router.tsx 的 ssr.nonce），内联脚本都会带上它
     const nonce = toHono ? undefined : createNonce()

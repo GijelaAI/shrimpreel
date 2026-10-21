@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assertProviderRefundAllowed, localRefundKey, planRefund } from '#/server/orders'
+import { assertProviderRefundAllowed, checkPaidEvent, localRefundKey, planRefund } from '#/server/orders'
 import { displayToMinor, minorToDisplay } from '#/server/payments/amount'
 
 // 部分退款按金额比例回收积分；累计退满才把订单置为 refunded
@@ -91,5 +91,43 @@ describe('assertProviderRefundAllowed', () => {
     const now = Date.parse(paidAt) + 30 * day
     expect(() => assertProviderRefundAllowed(order('dodo', 330), now)).not.toThrow()
     expect(() => assertProviderRefundAllowed(order('dodo', 330), now + 1)).toThrow(expect.objectContaining({ status: 409, code: 'refund_window_expired' }))
+  })
+})
+
+// 付款回调入账前核对：只拦买错商品和同币种少付；换币种、折扣码、缺字段时不误拦
+describe('checkPaidEvent', () => {
+  const order = { package_id: 'starter', amount_cents: 990, currency: 'USD' }
+  const paid = {
+    kind: 'paid' as const,
+    eventId: 'e',
+    eventType: 'payment.succeeded',
+    orderId: 'ord_1',
+    providerOrderId: null,
+    providerPaymentId: null,
+    paidAmount: '9.90',
+    paidCurrency: 'USD',
+    paidAmountCents: 990,
+  }
+
+  it('金额相等或含税多付都通过', () => {
+    expect(checkPaidEvent(order, paid, null)).toBeNull()
+    expect(checkPaidEvent(order, { ...paid, paidAmountCents: 1079, paidCurrency: 'usd' }, null)).toBeNull()
+  })
+
+  it('同币种少付、商品或套餐不符时返回原因', () => {
+    expect(checkPaidEvent(order, { ...paid, paidAmountCents: 1 }, null)).toMatch(/paid 1 < price 990/)
+    expect(checkPaidEvent(order, { ...paid, productId: 'pdt_pro' }, 'pdt_starter')).toMatch(/product pdt_pro/)
+    expect(checkPaidEvent(order, { ...paid, packageId: 'pro' }, null)).toMatch(/package pro/)
+  })
+
+  it('换币种、折扣码、缺金额或未配置商品映射时不拦', () => {
+    expect(checkPaidEvent(order, { ...paid, paidAmountCents: 70000, paidCurrency: 'JPY' }, null)).toBeNull()
+    expect(checkPaidEvent(order, { ...paid, paidAmountCents: 500, discounted: true }, null)).toBeNull()
+    expect(checkPaidEvent(order, { ...paid, paidAmountCents: null }, null)).toBeNull()
+    expect(checkPaidEvent(order, { ...paid, productId: 'pdt_x' }, null)).toBeNull()
+  })
+
+  it('折扣码不豁免商品核对', () => {
+    expect(checkPaidEvent(order, { ...paid, discounted: true, productId: 'pdt_pro' }, 'pdt_starter')).toMatch(/product/)
   })
 })

@@ -2,4 +2,5 @@
 interface Env {
   TURNSTILE_SECRET_KEY?: string
   OPENAI_API_KEY?: string
+  YIR_API_KEY?: string
 }

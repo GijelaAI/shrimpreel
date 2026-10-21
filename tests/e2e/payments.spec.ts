@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { buyPackage, credits, devLogin, json, ledger, post, uniqueEmail, uploadPhoto } from './helpers'
 
-type Result = { status: 'processed' | 'duplicate' | 'ignored' }
+type Result = { status: 'processed' | 'duplicate' | 'ignored' | 'orphan' | 'mismatch'; note?: string }
+type HealthCheck = { stats: { paymentReview: { count: number; latest: string | null } }; alerts: Array<{ kind: string; count: number }> }
 
 test('并发、重放、退款后迟到的支付事件：积分只入账一次、只回收一次', async ({ request }) => {
   await devLogin(request, uniqueEmail('idem'))
@@ -33,6 +34,74 @@ test('并发、重放、退款后迟到的支付事件：积分只入账一次�
     ['order_refund', -60],
     ['purchase', 60],
   ])
+})
+
+test('退款事件先于付款事件到达：先拒收等支付商重试，付款入账后重试的退款照常回收积分', async ({ request }) => {
+  await devLogin(request, uniqueEmail('ooo'))
+  const { orderId } = await json<{ orderId: string }>(post(request, '/api/checkout', { packageId: 'party', locale: 'en' }))
+  const refund = () => post(request, '/api/mock-payments/complete', { orderId, outcome: 'refunded', eventId: `${orderId}_refund` })
+
+  expect((await refund()).status()).toBe(500)
+  expect((await json<{ order: { status: string } }>(request.get(`/api/orders/${orderId}`))).order.status).toBe('pending')
+
+  await json(post(request, '/api/mock-payments/complete', { orderId, outcome: 'paid', eventId: `${orderId}_paid` }))
+  expect(await credits(request)).toBe(60)
+  // 支付商用同一个事件 id 重试：失败过的事件允许重新处理
+  expect((await json<Result>(refund())).status).toBe('processed')
+  expect(await credits(request)).toBe(0)
+  expect((await json<{ order: { status: string } }>(request.get(`/api/orders/${orderId}`))).order.status).toBe('refunded')
+})
+
+test('付款金额或套餐与订单不符、找不到订单：不入账、告警，退款后结案', async ({ request }, testInfo) => {
+  const since = new Date().toISOString()
+  await devLogin(request, uniqueEmail('mismatch'))
+  const checkout = async () => (await json<{ orderId: string }>(post(request, '/api/checkout', { packageId: 'starter', locale: 'en' }))).orderId
+  const complete = (orderId: string, extra: Record<string, unknown>, tag: string) =>
+    json<Result>(post(request, '/api/mock-payments/complete', { orderId, outcome: 'paid', eventId: `${orderId}_${tag}`, ...extra }))
+  const orderStatus = async (orderId: string) => (await json<{ order: { status: string } }>(request.get(`/api/orders/${orderId}`))).order.status
+
+  // 同币种少付、套餐不符：订单保持 pending，积分不变；同一事件重放不会再次处理
+  const underpaid = await checkout()
+  const short = await complete(underpaid, { paidAmountCents: 1 }, 'short')
+  expect(short).toMatchObject({ status: 'mismatch' })
+  expect(short.note).toContain('paid 1 <')
+  expect((await complete(underpaid, { paidAmountCents: 1 }, 'short')).status).toBe('duplicate')
+  const wrongPackage = await checkout()
+  expect((await complete(wrongPackage, { packageId: 'party' }, 'pkg')).status).toBe('mismatch')
+  expect(await credits(request)).toBe(0)
+  expect(await orderStatus(underpaid)).toBe('pending')
+
+  // 换币种（Adaptive Currency）或用了折扣码时金额不可比，照常入账
+  const discounted = await checkout()
+  expect((await complete(discounted, { paidAmountCents: 500, discounted: true }, 'dsc')).status).toBe('processed')
+  const localCurrency = await checkout()
+  expect((await complete(localCurrency, { paidAmountCents: 150000, paidCurrency: 'JPY' }, 'jpy')).status).toBe('processed')
+  expect(await credits(request)).toBe(40)
+
+  // 找不到订单：本站（或没带 site）记 orphan；共用商户号的其他站点的事件直接忽略
+  const anyOrder = await checkout()
+  expect((await complete(anyOrder, { orphan: true }, 'orphan')).status).toBe('orphan')
+  expect((await complete(anyOrder, { orphan: true, site: 'other-site.example' }, 'other')).status).toBe('ignored')
+
+  const first = await json<HealthCheck>(post(request, '/api/dev/health-check', { since }))
+  expect(first.stats.paymentReview.count).toBe(3)
+  expect(first.alerts).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'payment_review', count: 3 })]))
+
+  // 站长在支付商后台退款：没入账的订单直接结案为 refunded，不动积分，不再计入告警
+  expect((await json<Result>(post(request, '/api/mock-payments/complete', { orderId: underpaid, outcome: 'refunded' }))).status).toBe('processed')
+  expect(await orderStatus(underpaid)).toBe('refunded')
+  expect(await credits(request)).toBe(40)
+  const second = await json<HealthCheck>(post(request, '/api/dev/health-check', { since }))
+  expect(second.stats.paymentReview.count).toBe(2)
+
+  // 后台能按状态筛出待核对事件
+  await devLogin(request, 'admin@example.com')
+  const { events } = await json<{ events: Array<{ order_id: string | null; status: string; error: string | null }> }>(
+    request.get('/api/admin/payment-events?status=mismatch'),
+  )
+  expect(events.find((e) => e.order_id === wrongPackage)).toMatchObject({ status: 'mismatch', error: 'package party is not starter' })
+
+  await testInfo.attach('payment-review', { body: JSON.stringify({ first, second }, null, 2), contentType: 'application/json' })
 })
 
 test('积分已部分消费后退款：最多扣到 0，流水记录实际扣除量', async ({ request }) => {

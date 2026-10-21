@@ -12,6 +12,8 @@ type Search = { order?: string }
 const POLL_MS = 2000
 const SLOW_AFTER_MS = 30_000
 const STOP_AFTER_MS = 5 * 60_000
+// 等这么久仍未到账时，请服务端向支付商查一次单（webhook 丢失或延迟）
+const RECONCILE_AT_MS = [15_000, 60_000]
 
 export const Route = createFileRoute('/{-$locale}/checkout/success')({
   validateSearch: (search: Record<string, unknown>): Search => ({
@@ -47,10 +49,17 @@ function CheckoutSuccessPage() {
     if (!orderId || !user) return
     let stopped = false
     let timer: ReturnType<typeof setTimeout>
+    let reconciles = 0
     const startedAt = Date.now()
+    const path = `/api/orders/${encodeURIComponent(orderId)}`
     async function poll() {
       try {
-        const data = await api<{ order: Order }>(`/api/orders/${encodeURIComponent(orderId!)}`)
+        const due = reconciles < RECONCILE_AT_MS.length && Date.now() - startedAt >= RECONCILE_AT_MS[reconciles]
+        if (due) reconciles++
+        // 查单失败（支付商超时、限流）不打断轮询，退回普通查询
+        const data = due
+          ? await api<{ order: Order }>(`${path}/reconcile`, { method: 'POST' }).catch(() => api<{ order: Order }>(path))
+          : await api<{ order: Order }>(path)
         if (stopped) return
         setOrder(data.order)
         if (data.order.status !== 'pending') {

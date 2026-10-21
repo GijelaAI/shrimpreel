@@ -1,0 +1,72 @@
+# 部署示例：站点仓库里复制为 .github/workflows/deploy.yml 后启用。模板自己不部署，文件名带 .example，GitHub 不会运行它。
+# 手动触发：typecheck 和单元测试 → 离线体检 → 应用远端 migration → npm run deploy（完整体检 + build + wrangler deploy）→ 线上只读巡检。
+#
+# 准备：
+#   1. Settings → Environments 新建 production（建议加 Required reviewers），放两个 secret：
+#      - CLOUDFLARE_API_TOKEN：权限模板选“Edit Cloudflare Workers”，再加 Account 级的 D1 Edit 和 Queues Edit；资源只选这个账号
+#      - CLOUDFLARE_ACCOUNT_ID
+#   2. Worker 的运行时密钥不经过 CI：在本地用 node scripts/sync-secrets.mjs 同步（见 README“部署到 Cloudflare”）。
+#   3. 首次部署（建 D1/R2/KV/队列、上传模板源视频、绑定域名）按 README 在本地做完；这个 workflow 只负责之后的发布。
+#
+# 巡检失败时新版本已经上线：看 smoke-report，必要时 npx wrangler rollback 回到上一版（migration 不会回滚）。
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_smoke:
+        description: 跳过部署后的线上巡检
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# 同一时间只跑一次部署，后来的排队，不取消正在跑的
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # 固定 ubuntu-24.04，原因同 ci.yml
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # 先离线体检：vars、绑定、TODO(site) 有错就停在这里，不碰远端 D1
+      - run: npm run doctor -- --offline
+      # migration 要在新代码上线前应用；CI 里 wrangler 跳过 “continue?” 确认直接执行（wrangler 4 的非交互默认值是 yes）。
+      # npm run deploy 里的完整体检会再核对 secret 名字和远端 migration
+      - run: npm run db:migrate:remote
+      - run: npm run deploy
+      - name: Read SITE_URL
+        id: site
+        run: |
+          url=$(node --input-type=module -e "import { readWranglerConfig } from './scripts/doctor.mjs'; console.log(readWranglerConfig('wrangler.jsonc').vars.SITE_URL)")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - if: ${{ !inputs.skip_smoke }}
+        run: npx playwright install --with-deps chromium
+      - if: ${{ !inputs.skip_smoke }}
+        run: npm run test:smoke
+        env:
+          SMOKE_BASE_URL: ${{ steps.site.outputs.url }}
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && !inputs.skip_smoke }}
+        with:
+          name: smoke-report
+          path: .tmp/smoke-prod/
+          retention-days: 14

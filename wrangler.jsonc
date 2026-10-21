@@ -17,15 +17,17 @@
     "SITE_URL": "http://localhost:3000",
     // waffo | dodo | mock（mock 只允许非 production）
     "PAYMENT_PROVIDER": "mock",
-    // fal | mock（mock 只允许非 production）
+    // fal | yir | mock（mock 只允许非 production）
     "VIDEO_PROVIDER": "mock",
     // 管理员邮箱（逗号分隔）：登录即为管理员，同时接收举报、留言提醒和系统告警
     "ADMIN_EMAILS": "admin@example.com",
     // 交易邮件发件地址，域名须在 Cloudflare Email Service 完成 Onboard；留空 = 不发信（后台“邮件”页记为 skipped）
     "EMAIL_FROM": "noreply@example.com",
     "WAFFO_ENVIRONMENT": "test",
+    // Waffo 店铺 ID（STO_xxx，公开）：订阅的客户门户要用；只卖积分包可以留空
+    "WAFFO_STORE_ID": "",
     "DODO_ENVIRONMENT": "test",
-    // 每个积分包对应支付商的 product id（JSON：{"starter":"PROD_xxx",...}）
+    // 每个积分包、订阅套餐对应支付商的 product id（JSON：{"starter":"PROD_xxx","monthly":"PROD_yyy",...}）
     "WAFFO_PRODUCTS": "{}",
     "DODO_PRODUCTS": "{}",
     "GOOGLE_CLIENT_ID": "",

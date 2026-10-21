@@ -11,5 +11,11 @@ test-results/
 playwright-report/
 .tanstack/
 # 本机工具与账号备注，不进仓库
-.claude/
+.claude/*
+# 只入库本项目自己的 skill；其它 skill、agents 和本机设置不入库
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/new-hot-site/
+!.claude/skills/sync-upstream/
+!.claude/skills/launch-audit/
 *.local.md

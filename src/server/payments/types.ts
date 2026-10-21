@@ -23,7 +23,31 @@ export type PaymentEvent =
       providerPaymentId: string | null
       paidAmount: string | null
       paidCurrency: string | null
-      paidAmountCents: number | null // 实收金额，最小货币单位
+      paidAmountCents: number | null // 实收金额（含税），最小货币单位
+      // 以下用于入账前的一致性核对（orders.ts checkPaidEvent）；支付商没有提供时留空，跳过对应检查
+      productId?: string | null // 实际购买的支付商商品 ID（Dodo product_cart）
+      packageId?: string | null // 商品元数据里的套餐 ID（Waffo productMetadata，由 waffo-setup.mjs 写入）
+      discounted?: boolean // 用了支付商折扣码：实收低于标价属正常
+      site?: string | null // 下单站点（checkout metadata.site），多个站共用商户号时区分别站的事件
+      // 订阅扣款（首付和每次续费）带上订阅信息，入账走 subscriptions.ts
+      subscription?: SubscriptionCharge | null
+    }
+  | {
+      // 订阅状态变化（激活、到期取消、恢复、逾期、终止等），只更新订阅状态，不动积分
+      kind: 'subscription'
+      eventId: string
+      eventType: string
+      orderId: string | null // 首单号（checkout metadata.orderId）
+      providerSubscriptionId: string
+      status: SubscriptionStatus | null // null = 事件不说明状态，只更新其他字段
+      cancelAtPeriodEnd: boolean | null
+      periodStart: string | null
+      periodEnd: string | null
+      providerCustomerId: string | null
+      productId: string | null // 换套餐后的支付商商品 ID（Dodo）
+      planId?: string | null // 换套餐后的套餐 ID（Waffo 商品元数据）
+      occurredAt: string | null // 事件发生时间，比已应用的状态旧时丢弃（webhook 可能乱序）
+      site: string | null
     }
   | {
       kind: 'refunded'
@@ -57,10 +81,49 @@ export interface RefundRequestResult {
   status: string
 }
 
+export type PaidEvent = Extract<PaymentEvent, { kind: 'paid' }>
+export type SubscriptionEvent = Extract<PaymentEvent, { kind: 'subscription' }>
+
+export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'expired'
+
+export interface SubscriptionCharge {
+  providerSubscriptionId: string
+  providerCustomerId?: string | null
+  // 这次扣款覆盖的周期；支付商没给时按付款时间加计费周期推算
+  periodStart?: string | null
+  periodEnd?: string | null
+}
+
+export interface SubscriptionRef {
+  providerSubscriptionId: string
+  providerCustomerId: string | null
+  user: { id: string; email: string }
+}
+
+// 主动查单（webhook 丢失或延迟时补救，见 src/server/reconcile.ts）需要的订单字段
+export interface ReconcileOrder {
+  id: string
+  packageId: string
+  providerSessionId: string | null
+}
+
+export interface PaidLookup {
+  event: PaidEvent
+  raw: unknown // 支付商原始响应，存进 payment_events.payload 备查
+}
+
 export interface PaymentProvider {
   id: PaymentProviderId
   createCheckout(input: CheckoutInput): Promise<CheckoutResult>
   refund?(input: RefundRequest): Promise<RefundRequestResult>
+  // 向支付商查这笔订单是否已付款成功；只在支付商明确返回成功时给出 paid 事件，其他情况（未付、失败、处理中）返回 null。
+  // 失败不落库：收银台里换卡重试仍可能成功，订单保持 pending，交给 webhook 或 24 小时超时取消
+  fetchPaidEvent?(order: ReconcileOrder): Promise<PaidLookup | null>
+  // 到期取消（当期结束后不再续费）与撤销取消。成功后本地先更新状态，之后的状态 webhook 以支付商为准
+  cancelSubscription?(subscription: SubscriptionRef): Promise<void>
+  resumeSubscription?(subscription: SubscriptionRef): Promise<void>
+  // 支付商托管的客户门户（换卡、发票、取消），返回跳转地址
+  portalUrl?(subscription: SubscriptionRef, returnUrl: string): Promise<string>
 }
 
 export class WebhookVerificationError extends Error {}

@@ -86,6 +86,12 @@ const ALERTS_ZH: Record<AlertKind, (p: AlertParams) => { title: string; summary:
     hint: '说明队列消费者在持续报错（服务商接口异常、R2 读写失败等），请在 Workers 日志里搜索 "video job failed"。',
     path: '/admin/generations',
   }),
+  provider_account: (p) => ({
+    title: `视频服务商账户异常：${p.count} 个任务失败`,
+    summary: `最近 ${span(p.windowMinutes)}有 ${p.count} 个生成任务因服务商账户问题失败（${p.detail ?? ''}），已自动退积分。不处理的话之后的任务都会失败。`,
+    hint: '按错误码处理：provider_not_configured 是没配密钥；YIR_UNAUTHORIZED 是密钥失效；YIR_INSUFFICIENT_BALANCE 到 yir 后台充值；YIR_SPEND_LIMIT_EXCEEDED 调高 API Key 的月度额度。',
+    path: '/admin/generations',
+  }),
   job_backlog: (p) => ({
     title: `${p.count} 个任务积压`,
     summary: `${p.count} 个生成任务创建超过 ${span(p.windowMinutes)}仍未完成，超时后会自动判失败并退积分。`,
@@ -96,6 +102,12 @@ const ALERTS_ZH: Record<AlertKind, (p: AlertParams) => { title: string; summary:
     title: `${p.count} 个支付回调处理失败`,
     summary: `最近 ${span(p.windowMinutes)}有 ${p.count} 个支付回调处理失败且没有重放成功，用户可能已付款但积分没到账。`,
     hint: '支付商会自动重试回调；持续失败请在后台“支付事件”页查看错误，修复后到支付商后台重发。',
+    path: '/admin/events',
+  }),
+  payment_review: (p) => ({
+    title: `${p.count} 笔付款待人工核对`,
+    summary: `最近 ${span(p.windowMinutes)}有 ${p.count} 个付款成功回调没有入账：找不到对应订单，或实收金额、币种、商品和订单不一致。`,
+    hint: '在“支付事件”页按状态筛选“孤儿事件”“金额/商品不符”查看原因；核实已付款就在订单页补单，否则到支付商后台退款。',
     path: '/admin/events',
   }),
   email_failures: (p) => ({

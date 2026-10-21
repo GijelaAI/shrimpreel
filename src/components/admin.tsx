@@ -100,11 +100,15 @@ const TONE: Record<string, 'ok' | 'warn' | 'bad' | 'muted'> = {
   partially_refunded: 'warn',
   open: 'warn',
   failed: 'bad',
+  orphan: 'bad',
+  mismatch: 'bad',
   canceled: 'muted',
   banned: 'bad',
   deleted: 'muted',
   removed: 'bad',
   rejected: 'muted',
+  past_due: 'bad',
+  expired: 'muted',
 }
 
 const LABEL: Record<string, string> = {
@@ -119,6 +123,8 @@ const LABEL: Record<string, string> = {
   succeeded: '成功',
   processed: '已处理',
   ignored: '已忽略',
+  orphan: '找不到订单',
+  mismatch: '金额/商品不符',
   active: '正常',
   banned: '封禁',
   deleted: '已注销',
@@ -126,6 +132,8 @@ const LABEL: Record<string, string> = {
   closed: '已关闭',
   removed: '已下架',
   rejected: '已驳回',
+  past_due: '扣款失败',
+  expired: '已结束',
 }
 
 export function Status({ value }: { value: string }) {

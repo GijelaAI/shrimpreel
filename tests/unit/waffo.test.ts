@@ -85,7 +85,15 @@ describe('normalizeWaffoEvent', () => {
       paidAmount: '10.79',
       paidCurrency: 'USD',
       paidAmountCents: 1079,
+      packageId: null,
+      site: null,
     })
+    const withProduct = normalizeWaffoEvent({
+      eventId: 'evt_2',
+      eventType: 'order.completed',
+      data: { orderMetadata: { orderId: 'ord_c' }, productMetadata: { site: 'example.com', credits: '60', packageId: 'starter' } },
+    })
+    expect(withProduct).toMatchObject({ orderId: 'ord_c', packageId: 'starter', site: 'example.com' })
   })
 
   it('旧 payload 只有 total 时回退；零小数币种按整数换算', () => {
@@ -174,5 +182,59 @@ describe('createWaffoProvider.createCheckout', () => {
       }),
     ).rejects.toMatchObject({ status: 503, code: 'payment_not_configured' })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('createWaffoProvider.fetchPaidEvent', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('按商户订单号查 GraphQL，取成功的那笔换算实收；查询不带幂等键，GraphQL 报错（HTTP 200）时抛出', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    })
+    let reply: unknown = {
+      data: {
+        payments: [
+          { id: 'PAY_old', orderId: 'ORD_1', status: 'canceled', orderMerchantExternalId: 'ord_1', snapshotAmountDetails: { total: '9.90', currency: 'USD' } },
+          { id: 'PAY_ok', orderId: 'ORD_2', status: 'succeeded', orderMerchantExternalId: 'ord_1', snapshotAmountDetails: { total: '10.69', currency: 'USD' } },
+        ],
+      },
+    }
+    const calls: Array<{ url: string; headers: Headers; body: string }> = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      calls.push({ url, headers: new Headers(init.headers), body: String(init.body) })
+      return new Response(JSON.stringify(reply), { status: 200 })
+    })
+    const provider = createWaffoProvider({ WAFFO_MERCHANT_ID: 'mer_1', WAFFO_PRIVATE_KEY: privateKey } as unknown as Env)
+
+    const found = await provider.fetchPaidEvent!({ id: 'ord_1', packageId: 'starter', providerSessionId: 'ses_1' })
+    expect(found?.event).toMatchObject({
+      kind: 'paid',
+      eventId: 'reconcile:PAY_ok',
+      orderId: 'ord_1',
+      providerOrderId: 'ORD_2',
+      providerPaymentId: 'PAY_ok',
+      paidCurrency: 'USD',
+      paidAmountCents: 1069,
+    })
+    const call = calls[0]!
+    expect(new URL(call.url).pathname).toBe('/v1/graphql')
+    expect(call.headers.get('x-idempotency-key')).toBeNull()
+    expect(JSON.parse(call.body).variables).toEqual({ ref: 'ord_1' })
+    const bodyHash = createHash('sha256').update(call.body).digest('base64')
+    const verifier = createVerify('RSA-SHA256').update(`POST
+/v1/graphql
+${call.headers.get('x-timestamp')}
+${bodyHash}`)
+    expect(verifier.verify(publicKey, call.headers.get('x-signature')!, 'base64')).toBe(true)
+
+    // 只有失败/取消的付款、或别的订单号的付款：视为未付
+    reply = { data: { payments: [{ id: 'PAY_x', status: 'succeeded', orderMerchantExternalId: 'ord_other', snapshotAmountDetails: {} }] } }
+    expect(await provider.fetchPaidEvent!({ id: 'ord_1', packageId: 'starter', providerSessionId: null })).toBeNull()
+
+    reply = { data: null, errors: [{ message: 'unauthorized' }] }
+    await expect(provider.fetchPaidEvent!({ id: 'ord_1', packageId: 'starter', providerSessionId: null })).rejects.toMatchObject({ status: 502 })
   })
 })

@@ -1,5 +1,5 @@
 import { Link, Outlet, createFileRoute } from '@tanstack/react-router'
-import { ArrowLeft, Banknote, ChartNoAxesCombined, ClipboardList, Film, Flag, LayoutDashboard, Mail, MailCheck, ScrollText, Users, Webhook } from 'lucide-react'
+import { ArrowLeft, Banknote, ChartNoAxesCombined, ClipboardList, Film, Flag, Gift, LayoutDashboard, Mail, MailCheck, ScrollText, SlidersHorizontal, Ticket, Users, Webhook } from 'lucide-react'
 import { LogoMark, Spinner } from '#/components/ui'
 import { site } from '#/config/site'
 import { useSession } from '#/lib/session'
@@ -14,6 +14,9 @@ const NAV = [
   { to: '/admin/users', label: '用户', icon: Users },
   { to: '/admin/orders', label: '订单', icon: Banknote },
   { to: '/admin/reports', label: '经营报表', icon: ChartNoAxesCombined },
+  { to: '/admin/redeem-codes', label: '兑换码', icon: Ticket },
+  { to: '/admin/referrals', label: '邀请排行', icon: Gift },
+  { to: '/admin/settings', label: '运营设置', icon: SlidersHorizontal },
   { to: '/admin/generations', label: '生成任务', icon: Film },
   { to: '/admin/takedowns', label: '举报下架', icon: Flag },
   { to: '/admin/messages', label: '用户留言', icon: Mail },

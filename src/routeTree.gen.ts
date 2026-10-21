@@ -17,7 +17,10 @@ import { Route as AdminEmailsRouteImport } from './routes/admin/emails'
 import { Route as AdminEventsRouteImport } from './routes/admin/events'
 import { Route as AdminGenerationsRouteImport } from './routes/admin/generations'
 import { Route as AdminMessagesRouteImport } from './routes/admin/messages'
+import { Route as AdminRedeemCodesRouteImport } from './routes/admin/redeem-codes'
+import { Route as AdminReferralsRouteImport } from './routes/admin/referrals'
 import { Route as AdminReportsRouteImport } from './routes/admin/reports'
+import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
 import { Route as AdminTakedownsRouteImport } from './routes/admin/takedowns'
 import { Route as Char123LocaleChar125IndexRouteImport } from './routes/{-$locale}/index'
 import { Route as Char123LocaleChar125SlugRouteImport } from './routes/{-$locale}/$slug'
@@ -82,9 +85,24 @@ const AdminMessagesRoute = AdminMessagesRouteImport.update({
   path: '/messages',
   getParentRoute: () => AdminRouteRoute,
 } as any)
+const AdminRedeemCodesRoute = AdminRedeemCodesRouteImport.update({
+  id: '/redeem-codes',
+  path: '/redeem-codes',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminReferralsRoute = AdminReferralsRouteImport.update({
+  id: '/referrals',
+  path: '/referrals',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
 const AdminReportsRoute = AdminReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminSettingsRoute = AdminSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => AdminRouteRoute,
 } as any)
 const AdminTakedownsRoute = AdminTakedownsRouteImport.update({
@@ -224,7 +242,10 @@ export interface FileRoutesByFullPath {
   '/admin/events': typeof AdminEventsRoute
   '/admin/generations': typeof AdminGenerationsRoute
   '/admin/messages': typeof AdminMessagesRoute
+  '/admin/redeem-codes': typeof AdminRedeemCodesRoute
+  '/admin/referrals': typeof AdminReferralsRoute
   '/admin/reports': typeof AdminReportsRoute
+  '/admin/settings': typeof AdminSettingsRoute
   '/admin/takedowns': typeof AdminTakedownsRoute
   '/{-$locale}/$slug': typeof Char123LocaleChar125SlugRoute
   '/{-$locale}/contact': typeof Char123LocaleChar125ContactRoute
@@ -254,7 +275,10 @@ export interface FileRoutesByTo {
   '/admin/events': typeof AdminEventsRoute
   '/admin/generations': typeof AdminGenerationsRoute
   '/admin/messages': typeof AdminMessagesRoute
+  '/admin/redeem-codes': typeof AdminRedeemCodesRoute
+  '/admin/referrals': typeof AdminReferralsRoute
   '/admin/reports': typeof AdminReportsRoute
+  '/admin/settings': typeof AdminSettingsRoute
   '/admin/takedowns': typeof AdminTakedownsRoute
   '/{-$locale}/$slug': typeof Char123LocaleChar125SlugRoute
   '/{-$locale}/contact': typeof Char123LocaleChar125ContactRoute
@@ -288,7 +312,10 @@ export interface FileRoutesById {
   '/admin/events': typeof AdminEventsRoute
   '/admin/generations': typeof AdminGenerationsRoute
   '/admin/messages': typeof AdminMessagesRoute
+  '/admin/redeem-codes': typeof AdminRedeemCodesRoute
+  '/admin/referrals': typeof AdminReferralsRoute
   '/admin/reports': typeof AdminReportsRoute
+  '/admin/settings': typeof AdminSettingsRoute
   '/admin/takedowns': typeof AdminTakedownsRoute
   '/{-$locale}/$slug': typeof Char123LocaleChar125SlugRoute
   '/{-$locale}/contact': typeof Char123LocaleChar125ContactRoute
@@ -323,7 +350,10 @@ export interface FileRouteTypes {
     | '/admin/events'
     | '/admin/generations'
     | '/admin/messages'
+    | '/admin/redeem-codes'
+    | '/admin/referrals'
     | '/admin/reports'
+    | '/admin/settings'
     | '/admin/takedowns'
     | '/{-$locale}/$slug'
     | '/{-$locale}/contact'
@@ -353,7 +383,10 @@ export interface FileRouteTypes {
     | '/admin/events'
     | '/admin/generations'
     | '/admin/messages'
+    | '/admin/redeem-codes'
+    | '/admin/referrals'
     | '/admin/reports'
+    | '/admin/settings'
     | '/admin/takedowns'
     | '/{-$locale}/$slug'
     | '/{-$locale}/contact'
@@ -386,7 +419,10 @@ export interface FileRouteTypes {
     | '/admin/events'
     | '/admin/generations'
     | '/admin/messages'
+    | '/admin/redeem-codes'
+    | '/admin/referrals'
     | '/admin/reports'
+    | '/admin/settings'
     | '/admin/takedowns'
     | '/{-$locale}/$slug'
     | '/{-$locale}/contact'
@@ -474,11 +510,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminMessagesRouteImport
       parentRoute: typeof AdminRouteRoute
     }
+    '/admin/redeem-codes': {
+      id: '/admin/redeem-codes'
+      path: '/redeem-codes'
+      fullPath: '/admin/redeem-codes'
+      preLoaderRoute: typeof AdminRedeemCodesRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/referrals': {
+      id: '/admin/referrals'
+      path: '/referrals'
+      fullPath: '/admin/referrals'
+      preLoaderRoute: typeof AdminReferralsRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
     '/admin/reports': {
       id: '/admin/reports'
       path: '/reports'
       fullPath: '/admin/reports'
       preLoaderRoute: typeof AdminReportsRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/settings': {
+      id: '/admin/settings'
+      path: '/settings'
+      fullPath: '/admin/settings'
+      preLoaderRoute: typeof AdminSettingsRouteImport
       parentRoute: typeof AdminRouteRoute
     }
     '/admin/takedowns': {
@@ -644,7 +701,10 @@ interface AdminRouteRouteChildren {
   AdminEventsRoute: typeof AdminEventsRoute
   AdminGenerationsRoute: typeof AdminGenerationsRoute
   AdminMessagesRoute: typeof AdminMessagesRoute
+  AdminRedeemCodesRoute: typeof AdminRedeemCodesRoute
+  AdminReferralsRoute: typeof AdminReferralsRoute
   AdminReportsRoute: typeof AdminReportsRoute
+  AdminSettingsRoute: typeof AdminSettingsRoute
   AdminTakedownsRoute: typeof AdminTakedownsRoute
   AdminIndexRoute: typeof AdminIndexRoute
   AdminOrdersIdRoute: typeof AdminOrdersIdRoute
@@ -659,7 +719,10 @@ const AdminRouteRouteChildren: AdminRouteRouteChildren = {
   AdminEventsRoute: AdminEventsRoute,
   AdminGenerationsRoute: AdminGenerationsRoute,
   AdminMessagesRoute: AdminMessagesRoute,
+  AdminRedeemCodesRoute: AdminRedeemCodesRoute,
+  AdminReferralsRoute: AdminReferralsRoute,
   AdminReportsRoute: AdminReportsRoute,
+  AdminSettingsRoute: AdminSettingsRoute,
   AdminTakedownsRoute: AdminTakedownsRoute,
   AdminIndexRoute: AdminIndexRoute,
   AdminOrdersIdRoute: AdminOrdersIdRoute,

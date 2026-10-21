@@ -1,6 +1,7 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { AdminPage, LoadState, marginCents, money, useAdminData } from '#/components/admin'
+import type { ConfigIssue } from '#/server/config-health'
 
 export const Route = createFileRoute('/admin/')({
   component: AdminOverview,
@@ -21,6 +22,7 @@ type Stats = {
   failedEmails: number
   generationCost30d: { videos: number; costCents: number; creditsUsed: number }
   revenuePerCreditCents: number | null
+  config: ConfigIssue[]
 }
 
 function revenueText(rows: Revenue[]) {
@@ -97,11 +99,12 @@ function AdminOverview() {
                 n={data.openTakedowns}
               />
               <Todo to="/admin/messages" label="待回复留言" n={data.openMessages} />
-              <Todo to="/admin/events" label="处理失败的支付事件" n={data.failedPaymentEvents} />
+              <Todo to="/admin/events" label="待核对的支付事件" n={data.failedPaymentEvents} />
               <Todo to="/admin/emails" label="发送失败的邮件" n={data.failedEmails} />
               <Todo to="/admin/generations" label="生成中的任务" n={(gen.queued ?? 0) + (gen.processing ?? 0)} />
             </div>
           </div>
+          <ConfigCheck issues={data.config} />
         </>
       ) : null}
     </AdminPage>
@@ -114,6 +117,32 @@ function Stat({ label, value, hint }: { label: string; value: ReactNode; hint: s
       <p className="text-sm text-muted">{label}</p>
       <p className="mt-2 text-2xl font-semibold">{value}</p>
       <p className="mt-1 text-xs text-muted">{hint}</p>
+    </div>
+  )
+}
+
+function ConfigCheck({ issues }: { issues: ConfigIssue[] }) {
+  const errors = issues.filter((i) => i.level === 'error').length
+  return (
+    <div className="card space-y-3 p-5" data-testid="admin-config">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-semibold">上线配置检查</h2>
+        <p className="text-xs text-muted">
+          {issues.length ? `${errors} 个错误，${issues.length - errors} 个提醒` : '全部通过'} · 部署前用 npm run doctor 另查资源 id、密钥名和远端 migration
+        </p>
+      </div>
+      {issues.length ? (
+        <ul className="space-y-1 text-sm">
+          {issues.map((issue) => (
+            <li key={`${issue.key}:${issue.message}`} className="flex gap-2">
+              <span className={`shrink-0 font-semibold ${issue.level === 'error' ? 'text-red-600' : 'text-amber-600'}`}>
+                {issue.level === 'error' ? '错误' : '提醒'}
+              </span>
+              <span>{issue.message}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   )
 }

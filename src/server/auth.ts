@@ -1,8 +1,9 @@
 import type { Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
-import { site } from '#/config/site'
 import type { RequestAttribution } from './attribution'
 import { ledgerStatements } from './credits'
+import { bindReferralStatement, type SignupReferral } from './referrals'
+import { getSettings } from './settings'
 import type { AppContext, UserRow } from './types'
 import { ApiError, createId, isProduction, nowIso, randomToken, sha256Hex } from './util'
 
@@ -76,9 +77,10 @@ export interface SignInProfile {
   country: string | null
   locale: string | null
   attribution?: RequestAttribution | null // 仅新用户注册时写入
+  referral?: SignupReferral | null // 仅新用户注册时绑定邀请人
 }
 
-// Google 登录与 dev 登录共用：按 google_sub / email 找人，没有就创建并发放注册赠送积分。
+// Google 登录与 dev 登录共用：按 google_sub / email 找人，没有就创建并发放注册赠送积分（后台运营参数，默认取 site.ts）。
 export async function upsertUser(env: Env, profile: SignInProfile): Promise<UserRow> {
   const email = profile.email.trim().toLowerCase()
   const db = env.DB
@@ -127,13 +129,16 @@ export async function upsertUser(env: Env, profile: SignInProfile): Promise<User
         now,
       ),
   ]
-  if (site.signupBonusCredits > 0) {
+  if (profile.referral) statements.push(bindReferralStatement(db, id, profile.referral, now))
+  const { signupBonusCredits, signupBonusValidDays } = await getSettings(env)
+  if (signupBonusCredits > 0) {
     statements.push(
       ...ledgerStatements(db, {
         userId: id,
-        delta: site.signupBonusCredits,
+        delta: signupBonusCredits,
         reason: 'signup_bonus',
         idempotencyKey: `signup:${id}`,
+        expiresAt: signupBonusValidDays > 0 ? new Date(Date.now() + signupBonusValidDays * 86400_000).toISOString() : null,
       }),
     )
   }

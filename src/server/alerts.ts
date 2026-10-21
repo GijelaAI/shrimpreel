@@ -11,15 +11,23 @@ export const ALERT_BUCKET_HOURS = 6
 // 不计入生成失败率的错误码：管理员手动判失败、举报下架都不是系统问题
 const EXCLUDED_FAILURES = ['admin_failed', 'content_removed']
 
+// 视频服务商账户问题（没配密钥、密钥失效、余额或月度额度不足）：重试没用，要站长去服务商后台处理。
+// 任务已失败退积分，但之后的任务会一直失败，所以出现 1 个就告警，不等失败率
+export const PROVIDER_ACCOUNT_ERRORS = ['provider_not_configured', 'YIR_UNAUTHORIZED', 'YIR_INSUFFICIENT_BALANCE', 'YIR_SPEND_LIMIT_EXCEEDED']
+
 export const ALERT_RULES = {
   // 最近 1 小时完成的任务里失败 ≥ 3 个且占比 ≥ 30%（零星失败、大流量下的个别失败不报）
   generation_failures: { windowMinutes: 60, min: 3, minRate: 0.3 },
   // 最近 1 小时有任务因队列消息重试耗尽被判失败（error_code = dead_letter）
   dead_letter: { windowMinutes: 60, min: 1 },
+  // 最近 1 小时有任务因服务商账户问题失败（PROVIDER_ACCOUNT_ERRORS）
+  provider_account: { windowMinutes: 60, min: 1 },
   // 创建超过 30 分钟仍未完成（jobs.ts 45 分钟时判超时退款）
   job_backlog: { windowMinutes: 30, min: 1 },
   // 最近 24 小时有处理失败、且之后没有重放成功的支付回调：用户可能付了款没到账
   payment_webhook: { windowMinutes: 24 * 60, min: 1 },
+  // 最近 24 小时有付了款但没入账的回调：找不到订单（orphan），或金额、币种、商品和订单对不上（mismatch，订单补单或退款后不再计入）
+  payment_review: { windowMinutes: 24 * 60, min: 1 },
   // 最近 6 小时创建的邮件（不含告警邮件）里最终失败、或重试 ≥ 3 次仍未发出的 ≥ 3 封（完整重试约 3.3 小时）
   email_failures: { windowMinutes: 6 * 60, min: 3 },
 } as const
@@ -32,8 +40,10 @@ export type Alert = TemplateParams['admin_alert']
 export interface HealthStats {
   generations: { finished: number; failed: number; topErrors: string | null }
   deadLetters: number
+  providerAccount: { count: number; detail: string | null }
   backlog: number
   webhookFailures: { count: number; latest: string | null }
+  paymentReview: { count: number; latest: string | null }
   emailFailures: number
 }
 
@@ -51,9 +61,13 @@ export function evaluateHealth(stats: HealthStats): Alert[] {
   const rate = ALERT_RULES.generation_failures
   if (failed >= rate.min && failed / finished >= rate.minRate) alerts.push(alert('generation_failures', failed, { total: finished, detail: topErrors }))
   if (stats.deadLetters >= ALERT_RULES.dead_letter.min) alerts.push(alert('dead_letter', stats.deadLetters))
+  const account = stats.providerAccount
+  if (account.count >= ALERT_RULES.provider_account.min) alerts.push(alert('provider_account', account.count, { detail: account.detail }))
   if (stats.backlog >= ALERT_RULES.job_backlog.min) alerts.push(alert('job_backlog', stats.backlog))
   const webhooks = stats.webhookFailures
   if (webhooks.count >= ALERT_RULES.payment_webhook.min) alerts.push(alert('payment_webhook', webhooks.count, { detail: webhooks.latest }))
+  const review = stats.paymentReview
+  if (review.count >= ALERT_RULES.payment_review.min) alerts.push(alert('payment_review', review.count, { detail: review.latest }))
   if (stats.emailFailures >= ALERT_RULES.email_failures.min) alerts.push(alert('email_failures', stats.emailFailures))
   return alerts
 }
@@ -73,7 +87,11 @@ export async function collectHealthStats(env: Env, now: number, since?: string):
   const finishedSince = 'updated_at >= ? AND completed_at >= ?'
   const genStart = start('generation_failures')
   const deadStart = start('dead_letter')
-  const [finished, topErrors, deadLetters, backlog, webhooks, latestWebhook, emails] = await db.batch([
+  const accountStart = start('provider_account')
+  const accountCodes = PROVIDER_ACCOUNT_ERRORS.map(() => '?').join(', ')
+  const reviewWhere = `e.status IN ('orphan', 'mismatch') AND e.created_at >= ?
+    AND (e.status = 'orphan' OR NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = e.order_id AND o.status IN ('paid', 'refunded')))`
+  const [finished, topErrors, deadLetters, accountErrors, backlog, webhooks, latestWebhook, reviews, latestReview, emails] = await db.batch([
     db
       .prepare(
         `SELECT COUNT(*) AS finished, COALESCE(SUM(status = 'failed'), 0) AS failed FROM generations
@@ -91,6 +109,12 @@ export async function collectHealthStats(env: Env, now: number, since?: string):
       .prepare(`SELECT COUNT(*) AS n FROM generations WHERE status = 'failed' AND ${finishedSince} AND error_code = 'dead_letter'`)
       .bind(deadStart, deadStart),
     db
+      .prepare(
+        `SELECT error_code, COUNT(*) AS n FROM generations WHERE status = 'failed' AND ${finishedSince} AND error_code IN (${accountCodes})
+         GROUP BY error_code ORDER BY n DESC`,
+      )
+      .bind(accountStart, accountStart, ...PROVIDER_ACCOUNT_ERRORS),
+    db
       .prepare(`SELECT COUNT(*) AS n FROM generations WHERE status IN ('queued', 'processing') AND created_at < ?`)
       .bind(new Date(now - ALERT_RULES.job_backlog.windowMinutes * 60_000).toISOString()),
     db.prepare(`SELECT COUNT(*) AS n FROM payment_events WHERE status = 'failed' AND created_at >= ?`).bind(start('payment_webhook')),
@@ -99,6 +123,13 @@ export async function collectHealthStats(env: Env, now: number, since?: string):
         `SELECT provider, event_type, error FROM payment_events WHERE status = 'failed' AND created_at >= ? ORDER BY created_at DESC LIMIT 1`,
       )
       .bind(start('payment_webhook')),
+    db.prepare(`SELECT COUNT(*) AS n FROM payment_events e WHERE ${reviewWhere}`).bind(start('payment_review')),
+    db
+      .prepare(
+        `SELECT e.provider, e.event_type, e.status, e.order_id, e.error FROM payment_events e WHERE ${reviewWhere}
+         ORDER BY e.created_at DESC LIMIT 1`,
+      )
+      .bind(start('payment_review')),
     db
       .prepare(
         `SELECT COUNT(*) AS n FROM email_outbox WHERE created_at >= ? AND template != 'admin_alert'
@@ -108,19 +139,33 @@ export async function collectHealthStats(env: Env, now: number, since?: string):
   ])
   const n = (result: D1Result | undefined) => Number((result?.results[0] as { n?: number } | undefined)?.n ?? 0)
   const generations = finished?.results[0] as { finished: number; failed: number } | undefined
-  const errors = (topErrors?.results ?? []) as Array<{ error_code: string | null; n: number }>
+  const errorSummary = (result: D1Result | undefined) => {
+    const rows = (result?.results ?? []) as Array<{ error_code: string | null; n: number }>
+    return rows.length ? rows.map((e) => `${e.error_code ?? 'unknown'} ×${e.n}`).join(', ') : null
+  }
+  const accountRows = (accountErrors?.results ?? []) as Array<{ n: number }>
   const latest = latestWebhook?.results[0] as { provider: string; event_type: string; error: string | null } | undefined
+  const review = latestReview?.results[0] as
+    | { provider: string; event_type: string; status: string; order_id: string | null; error: string | null }
+    | undefined
   return {
     generations: {
       finished: Number(generations?.finished ?? 0),
       failed: Number(generations?.failed ?? 0),
-      topErrors: errors.length ? errors.map((e) => `${e.error_code ?? 'unknown'} ×${e.n}`).join(', ') : null,
+      topErrors: errorSummary(topErrors),
     },
     deadLetters: n(deadLetters),
+    providerAccount: { count: accountRows.reduce((sum, row) => sum + Number(row.n), 0), detail: errorSummary(accountErrors) },
     backlog: n(backlog),
     webhookFailures: {
       count: n(webhooks),
       latest: latest ? `${latest.provider} ${latest.event_type}: ${latest.error ?? ''}`.slice(0, 300) : null,
+    },
+    paymentReview: {
+      count: n(reviews),
+      latest: review
+        ? `${review.provider} ${review.event_type} ${review.status}${review.order_id ? ` ${review.order_id}` : ''}: ${review.error ?? ''}`.slice(0, 300)
+        : null,
     },
     emailFailures: n(emails),
   }

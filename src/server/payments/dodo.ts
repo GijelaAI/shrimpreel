@@ -1,15 +1,46 @@
 // Dodo Payments（Merchant of Record）。Checkout Sessions API + Standard Webhooks 签名。
 // 文档：https://docs.dodopayments.com/developer-resources/checkout-session
 //       https://docs.dodopayments.com/developer-resources/webhooks
+import { site } from '#/config/site'
 import { ApiError, base64Decode, base64Encode, cleanSecret, constantTimeEqual, hmacSha256, parseJsonRecord } from '../util'
 import { minorToDisplay } from './amount'
-import type { CheckoutInput, CheckoutResult, PaymentEvent, PaymentProvider, RefundRequest, RefundRequestResult } from './types'
+import type {
+  CheckoutInput,
+  CheckoutResult,
+  PaidLookup,
+  PaymentEvent,
+  PaymentProvider,
+  RefundRequest,
+  RefundRequestResult,
+  SubscriptionCharge,
+  SubscriptionRef,
+  SubscriptionStatus,
+} from './types'
 import { WebhookVerificationError } from './types'
+
+export const dodoBaseUrl = (env: Env) => (env.DODO_ENVIRONMENT === 'live' ? 'https://live.dodopayments.com' : 'https://test.dodopayments.com')
 
 export function createDodoProvider(env: Env): PaymentProvider {
   const apiKey = cleanSecret(env.DODO_API_KEY)
   const products = parseJsonRecord(env.DODO_PRODUCTS)
-  const baseUrl = env.DODO_ENVIRONMENT === 'live' ? 'https://live.dodopayments.com' : 'https://test.dodopayments.com'
+  const baseUrl = dodoBaseUrl(env)
+  // 订阅管理接口：失败统一转成 502（4xx 原因写进 message，只有管理员看得到）
+  const call = async (method: string, path: string, body?: unknown) => {
+    if (!apiKey) throw new ApiError(503, 'payment_not_configured', 'DODO_API_KEY missing')
+    const response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${apiKey}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    const json = (await response.json().catch(() => null)) as Record<string, unknown> | null
+    if (!response.ok) {
+      const message = typeof json?.message === 'string' ? json.message : ''
+      throw new ApiError(502, 'payment_provider_error', `Dodo ${method} ${path.split('/')[1]} failed (HTTP ${response.status}) ${message}`.trim())
+    }
+    return json ?? {}
+  }
+  const setCancel = (subscription: SubscriptionRef, cancel: boolean) =>
+    call('PATCH', `/subscriptions/${encodeURIComponent(subscription.providerSubscriptionId)}`, { cancel_at_next_billing_date: cancel })
   return {
     id: 'dodo',
     async createCheckout(input: CheckoutInput): Promise<CheckoutResult> {
@@ -23,7 +54,7 @@ export function createDodoProvider(env: Env): PaymentProvider {
           product_cart: [{ product_id: productId, quantity: 1 }],
           customer: { email: input.user.email, name: input.user.name ?? input.user.email },
           return_url: input.successUrl,
-          metadata: { orderId: input.order.id, userId: input.user.id, packageId: input.order.packageId },
+          metadata: { orderId: input.order.id, userId: input.user.id, packageId: input.order.packageId, site: site.domain },
         }),
       })
       const body = (await response.json().catch(() => null)) as { session_id?: string; checkout_url?: string } | null
@@ -59,6 +90,50 @@ export function createDodoProvider(env: Env): PaymentProvider {
         throw new ApiError(502, 'payment_provider_error', `Dodo refund failed (HTTP ${response.status}): ${body?.message ?? ''}`.trim())
       }
       return { refundId: body?.refund_id ?? null, status: body?.status ?? 'pending' }
+    },
+    // 先查 checkout session 拿到 payment_id 和支付状态，成功后再取 Payment 对象（字段与 payment.succeeded webhook 的 data 相同），
+    // 走同一个 normalizeDodoEvent，入账前核对规则完全一致
+    // https://docs.dodopayments.com/api-reference/checkout-sessions/get-checkout-session
+    // https://docs.dodopayments.com/api-reference/payments/get-payments-1
+    async fetchPaidEvent(order): Promise<PaidLookup | null> {
+      if (!apiKey) throw new ApiError(503, 'payment_not_configured', 'DODO_API_KEY missing')
+      if (!order.providerSessionId) return null
+      const get = async (path: string) => {
+        const response = await fetch(`${baseUrl}${path}`, { headers: { Authorization: `Bearer ${apiKey}` } })
+        if (response.status === 404) return null
+        if (!response.ok) throw new ApiError(502, 'payment_provider_error', `Dodo GET ${path.split('/')[1]} failed (HTTP ${response.status})`)
+        return (await response.json()) as Record<string, unknown>
+      }
+      const session = await get(`/checkouts/${encodeURIComponent(order.providerSessionId)}`)
+      const paymentId = str(session?.payment_id)
+      if (!paymentId || session?.payment_status !== 'succeeded') return null
+      const payment = await get(`/payments/${encodeURIComponent(paymentId)}`)
+      if (!payment || payment.status !== 'succeeded') return null
+      const event = normalizeDodoEvent({ type: 'payment.succeeded', __webhookId: `reconcile:${paymentId}`, data: payment })
+      return event.kind === 'paid' ? { event: { ...event, eventType: 'reconcile' }, raw: payment } : null
+    },
+    // https://docs.dodopayments.com/api-reference/subscriptions/patch-subscriptions
+    async cancelSubscription(subscription) {
+      await setCancel(subscription, true)
+    },
+    async resumeSubscription(subscription) {
+      await setCancel(subscription, false)
+    },
+    // https://docs.dodopayments.com/api-reference/customers/create-customer-portal-session
+    async portalUrl(subscription, returnUrl) {
+      let customerId = subscription.providerCustomerId
+      if (!customerId) {
+        const found = await call('GET', `/subscriptions/${encodeURIComponent(subscription.providerSubscriptionId)}`)
+        customerId = str(record(found.customer).customer_id)
+      }
+      if (!customerId) throw new ApiError(502, 'payment_provider_error', 'Dodo subscription has no customer')
+      const session = await call(
+        'POST',
+        `/customers/${encodeURIComponent(customerId)}/customer-portal/session?return_url=${encodeURIComponent(returnUrl)}`,
+      )
+      const link = str(session.link)
+      if (!link) throw new ApiError(502, 'payment_provider_error', 'Dodo portal returned no link')
+      return link
     },
   }
 }
@@ -112,6 +187,11 @@ export function normalizeDodoEvent(payload: Record<string, unknown>): PaymentEve
         paidAmount: cents !== null && currency ? minorToDisplay(cents, currency) : str(data.total_amount),
         paidCurrency: currency,
         paidAmountCents: cents,
+        // 订阅扣款的 product_cart 为 null，商品由订阅锁定，只核对金额
+        productId: firstProductId(data.product_cart),
+        discounted: !!data.discount_id || (Array.isArray(data.discounts) && data.discounts.length > 0),
+        site: str(metadata.site),
+        subscription: dodoSubscriptionCharge(data),
       }
     }
     case 'payment.failed':
@@ -130,12 +210,66 @@ export function normalizeDodoEvent(payload: Record<string, unknown>): PaymentEve
         originalAmountCents: null,
       }
     default:
+      // 订阅事件的 data 是完整的订阅对象，各类事件统一按其中的状态处理
+      // https://docs.dodopayments.com/developer-resources/subscription-integration-guide
+      if (eventType.startsWith('subscription.') && str(data.subscription_id)) {
+        return {
+          kind: 'subscription',
+          eventId,
+          eventType,
+          orderId,
+          providerSubscriptionId: str(data.subscription_id)!,
+          status: DODO_STATUS[String(data.status)] ?? null,
+          cancelAtPeriodEnd: typeof data.cancel_at_next_billing_date === 'boolean' ? data.cancel_at_next_billing_date : null,
+          periodStart: str(data.previous_billing_date),
+          periodEnd: str(data.next_billing_date),
+          providerCustomerId: str(record(data.customer).customer_id),
+          productId: str(data.product_id),
+          occurredAt: str(payload.timestamp),
+          site: str(metadata.site),
+        }
+      }
       return { kind: 'ignored', eventId, eventType }
   }
 }
 
+// on_hold：续费扣款失败，等买家更新付款方式；paused 不改本地状态（不续费也不终止，模板不主动暂停）
+const DODO_STATUS: Record<string, SubscriptionStatus> = {
+  active: 'active',
+  on_hold: 'past_due',
+  past_due: 'past_due',
+  cancelled: 'canceled',
+  expired: 'expired',
+  failed: 'expired',
+}
+
+// 订阅扣款（首付和续费）：Payment 带 subscription_id，service_periods 给出这次扣款覆盖的周期
+// https://docs.dodopayments.com/api-reference/payments/get-payments-1
+function dodoSubscriptionCharge(data: Record<string, unknown>): SubscriptionCharge | null {
+  const subscriptionId = str(data.subscription_id)
+  if (!subscriptionId) return null
+  const periods = Array.isArray(data.service_periods) ? (data.service_periods as unknown[]).map(record) : []
+  const period = periods.find((p) => str(p.subscription_id) === subscriptionId) ?? periods[0]
+  return {
+    providerSubscriptionId: subscriptionId,
+    providerCustomerId: str(record(data.customer).customer_id),
+    periodStart: str(period?.starts_at),
+    periodEnd: str(period?.ends_at),
+  }
+}
+
+// 模板每单只买一个商品；购物车不是恰好一行时返回 null，交给金额核对
+function firstProductId(cart: unknown) {
+  if (!Array.isArray(cart) || cart.length !== 1) return null
+  return str((cart[0] as Record<string, unknown> | null)?.product_id)
+}
+
 function str(value: unknown) {
   return typeof value === 'string' && value ? value : typeof value === 'number' ? String(value) : null
+}
+
+function record(value: unknown) {
+  return (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
 }
 
 function int(value: unknown) {

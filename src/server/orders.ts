@@ -1,10 +1,21 @@
-import { clawbackStatements, ledgerStatements } from './credits'
+import { findPlan, site } from '#/config/site'
+import { alignSubscriptionGrantStatement, clawbackStatements, ledgerStatements } from './credits'
 import { notifyOrderPaid } from './notifications'
-import type { PaymentEvent, PaymentProviderId } from './payments/types'
-import type { OrderRow } from './types'
-import { ApiError, createId, isUniqueConstraintError, nowIso } from './util'
+import { referralClawbackStatements, referralRewardStatements } from './referrals'
+import { getSettings } from './settings'
+import { addInterval, grantWindow, nextGrantAt } from './subscriptions'
+import type { PaidEvent, PaymentEvent, PaymentProviderId, SubscriptionCharge, SubscriptionEvent } from './payments/types'
+import type { OrderRow, SubscriptionRow } from './types'
+import { ApiError, createId, isCheckConstraintError, isUniqueConstraintError, nowIso, parseJsonRecord, sha256Hex } from './util'
 
-export type FulfillmentResult = { status: 'processed' | 'duplicate' | 'ignored'; orderId: string | null; note?: string }
+// orphan：paid 事件找不到本站订单；mismatch：paid 事件和订单的金额、币种或商品对不上，没有入账。
+// 两者都返回 200（多个站可能共用一个商户号，返回 5xx 会让支付商对别站的事件无限重试），由健康检查告警后人工处理
+export type FulfillmentResult = {
+  status: 'processed' | 'duplicate' | 'ignored' | 'orphan' | 'mismatch'
+  orderId: string | null
+  note?: string
+}
+type EventStatus = 'processed' | 'ignored' | 'failed' | 'orphan' | 'mismatch'
 
 // 处理归一化后的支付事件。幂等性两层保证：
 // 1) payment_events(provider, event_id) 唯一：同一事件重放直接返回 duplicate
@@ -24,59 +35,71 @@ export async function processPaymentEvent(
 
   let result: FulfillmentResult
   try {
-    result = await applyEvent(db, provider, event)
+    result = await applyEvent(env, provider, event)
   } catch (error) {
     await recordEvent(db, provider, event, null, 'failed', error instanceof Error ? error.message : String(error), rawPayload)
     throw error
   }
-  await recordEvent(
-    db,
-    provider,
-    event,
-    result.orderId,
-    result.status === 'ignored' ? 'ignored' : 'processed',
-    result.note ?? null,
-    rawPayload,
-  )
+  const status: EventStatus = result.status === 'duplicate' ? 'processed' : result.status
+  await recordEvent(db, provider, event, result.orderId, status, result.note ?? null, rawPayload)
   if (event.kind === 'paid' && result.status === 'processed' && result.orderId) await notifyOrderPaid(env, result.orderId)
   return result
 }
 
-async function applyEvent(db: D1Database, provider: PaymentProviderId, event: PaymentEvent): Promise<FulfillmentResult> {
+async function applyEvent(env: Env, provider: PaymentProviderId, event: PaymentEvent): Promise<FulfillmentResult> {
+  const db = env.DB
   if (event.kind === 'ignored') return { status: 'ignored', orderId: null, note: 'unhandled event type' }
+  if (event.kind === 'subscription') return applySubscriptionState(env, provider, event)
+  if (event.kind === 'paid' && event.subscription) return applySubscriptionPayment(env, provider, event, event.subscription)
 
   const order = await findOrder(db, provider, event)
-  if (!order) return { status: 'ignored', orderId: null, note: 'order not found' }
+  if (!order) {
+    // 退款、失败事件找不到订单不影响用户；付了款却找不到订单要人工核对。metadata 标明是别的站下的单就忽略
+    if (event.kind !== 'paid') return { status: 'ignored', orderId: null, note: 'order not found' }
+    if (event.site && event.site !== site.domain) return { status: 'ignored', orderId: null, note: `order of another site: ${event.site}` }
+    return { status: 'orphan', orderId: null, note: 'order not found' }
+  }
 
   if (event.kind === 'paid') {
     if (order.status === 'paid' || order.status === 'refunded') return { status: 'duplicate', orderId: order.id }
     const now = nowIso()
+    // 订阅套餐的订单只能按订阅扣款入账（每月积分要带到期时间）；付款事件没带订阅信息说明支付商那边建的不是订阅商品
+    const mismatch = findPlan(order.package_id)
+      ? `plan ${order.package_id} paid without subscription`
+      : checkPaidEvent(order, event, expectedProductId(env, provider, order.package_id))
+    if (mismatch) {
+      await markMismatch(db, order.id, event, now)
+      return { status: 'mismatch', orderId: order.id, note: mismatch }
+    }
+    // 被邀请人的第一笔付款：同一个 batch 里给邀请人发奖励（见 referrals.ts）
+    const referral = await referralRewardStatements(db, order, (await getSettings(env)).referralRewardCredits, now)
+    const fulfill = [
+      ...ledgerStatements(db, {
+        userId: order.user_id,
+        delta: order.credits,
+        reason: 'purchase',
+        refId: order.id,
+        idempotencyKey: `order:${order.id}`,
+      }),
+      db
+        .prepare(
+          `UPDATE orders SET status = 'paid', paid_at = ?, updated_at = ?,
+           provider_order_id = COALESCE(?, provider_order_id), provider_payment_id = COALESCE(?, provider_payment_id),
+           paid_amount = ?, paid_currency = ?, paid_amount_cents = ? WHERE id = ?`,
+        )
+        .bind(
+          now,
+          now,
+          event.providerOrderId,
+          event.providerPaymentId,
+          event.paidAmount,
+          event.paidCurrency,
+          event.paidAmountCents,
+          order.id,
+        ),
+    ]
     try {
-      await db.batch([
-        ...ledgerStatements(db, {
-          userId: order.user_id,
-          delta: order.credits,
-          reason: 'purchase',
-          refId: order.id,
-          idempotencyKey: `order:${order.id}`,
-        }),
-        db
-          .prepare(
-            `UPDATE orders SET status = 'paid', paid_at = ?, updated_at = ?,
-             provider_order_id = COALESCE(?, provider_order_id), provider_payment_id = COALESCE(?, provider_payment_id),
-             paid_amount = ?, paid_currency = ?, paid_amount_cents = ? WHERE id = ?`,
-          )
-          .bind(
-            now,
-            now,
-            event.providerOrderId,
-            event.providerPaymentId,
-            event.paidAmount,
-            event.paidCurrency,
-            event.paidAmountCents,
-            order.id,
-          ),
-      ])
+      await batchWithOptional(db, fulfill, referral)
     } catch (error) {
       if (isUniqueConstraintError(error)) return { status: 'duplicate', orderId: order.id }
       throw error
@@ -85,6 +108,27 @@ async function applyEvent(db: D1Database, provider: PaymentProviderId, event: Pa
   }
 
   if (event.kind === 'refunded') {
+    if (order.status !== 'paid' && order.status !== 'refunded') {
+      // 金额/商品不符没有入账的付款，站长在支付商后台退款后结案：不动积分，只把订单标为已退款
+      const unfulfilled = await db
+        .prepare(`SELECT 1 FROM payment_events WHERE order_id = ? AND status = 'mismatch' LIMIT 1`)
+        .bind(order.id)
+        .first()
+      if (unfulfilled) {
+        const now = nowIso()
+        await db
+          .prepare(
+            `UPDATE orders SET status = 'refunded', refunded_amount_cents = ?, refunded_at = ?, updated_at = ?
+             WHERE id = ? AND status NOT IN ('paid', 'refunded')`,
+          )
+          .bind(event.refundAmountCents ?? event.originalAmountCents ?? 0, now, now, order.id)
+          .run()
+        return { status: 'processed', orderId: order.id, note: 'refund of unfulfilled mismatch payment' }
+      }
+      // 退款事件先于付款事件到达（付款回调失败重试中）：记为 failed 并返回 5xx，让支付商稍后重试，
+      // 否则付款入账后这笔退款就不会再回收积分
+      throw new Error(`refund before payment: order ${order.id} is ${order.status}`)
+    }
     const refunded = await refundOrder(db, order, {
       refundKey: event.refundId ?? event.eventId,
       amountCents: event.refundAmountCents,
@@ -102,6 +146,336 @@ async function applyEvent(db: D1Database, provider: PaymentProviderId, event: Pa
   return { status: 'processed', orderId: order.id }
 }
 
+// 入账前核对 paid 事件和订单，返回不一致的原因，null 表示通过。只拦“买错商品”和“少付”：
+// - 含税定价时实收 = 标价，不含税定价时实收 = 标价 + 税，所以同币种下实收（含税）不应低于标价；
+// - 币种不同（Dodo Adaptive Currency 按买家本地货币收款）或用了折扣码时金额没法比，只核对商品
+export function checkPaidEvent(
+  order: Pick<OrderRow, 'package_id' | 'amount_cents' | 'currency'>,
+  event: PaidEvent,
+  expectedProductId: string | null,
+): string | null {
+  if (event.productId && expectedProductId && event.productId !== expectedProductId) {
+    return `product ${event.productId} is not ${expectedProductId} (${order.package_id})`
+  }
+  if (event.packageId && event.packageId !== order.package_id) return `package ${event.packageId} is not ${order.package_id}`
+  if (event.discounted || event.paidAmountCents === null || !event.paidCurrency) return null
+  if (event.paidCurrency.toUpperCase() !== order.currency.toUpperCase()) return null
+  if (event.paidAmountCents < order.amount_cents) {
+    return `paid ${event.paidAmountCents} < price ${order.amount_cents} ${order.currency}`
+  }
+  return null
+}
+
+function providerProducts(env: Env, provider: PaymentProviderId) {
+  return parseJsonRecord(provider === 'dodo' ? env.DODO_PRODUCTS : provider === 'waffo' ? env.WAFFO_PRODUCTS : undefined)
+}
+
+function expectedProductId(env: Env, provider: PaymentProviderId, packageId: string) {
+  return providerProducts(env, provider)[packageId] ?? null
+}
+
+// 不入账，订单保持原状态；记下支付商单号，方便后台按流水号搜到订单，核实后补单或退款
+async function markMismatch(db: D1Database, orderId: string, event: PaidEvent, now: string) {
+  await db
+    .prepare(
+      `UPDATE orders SET provider_order_id = COALESCE(?, provider_order_id),
+       provider_payment_id = COALESCE(?, provider_payment_id), updated_at = ? WHERE id = ?`,
+    )
+    .bind(event.providerOrderId, event.providerPaymentId, now, orderId)
+    .run()
+}
+
+function findSubscription(db: D1Database, provider: PaymentProviderId, providerSubscriptionId: string) {
+  return db
+    .prepare('SELECT * FROM subscriptions WHERE provider = ? AND provider_subscription_id = ?')
+    .bind(provider, providerSubscriptionId)
+    .first<SubscriptionRow>()
+}
+
+// 订阅扣款。首付：按 checkout 时的订单入账并建订阅；续费：每次扣款新建一张订单（订单号由支付号派生，重放不会重复建单），
+// 金额按订阅锁定的价格核对。积分当期结束作废；年付首付先发第一个月，其余由 Cron 每月补发（subscriptions.ts）
+async function applySubscriptionPayment(
+  env: Env,
+  provider: PaymentProviderId,
+  event: PaidEvent,
+  charge: SubscriptionCharge,
+): Promise<FulfillmentResult> {
+  const db = env.DB
+  const sub = await findSubscription(db, provider, charge.providerSubscriptionId)
+  if (event.providerPaymentId) {
+    const paid = await db
+      .prepare(`SELECT id FROM orders WHERE provider = ? AND provider_payment_id = ? AND status IN ('paid', 'refunded')`)
+      .bind(provider, event.providerPaymentId)
+      .first<{ id: string }>()
+    if (paid) return { status: 'duplicate', orderId: paid.id }
+  }
+  return sub ? applySubscriptionRenewal(env, provider, event, charge, sub) : applySubscriptionStart(env, provider, event, charge)
+}
+
+async function applySubscriptionStart(
+  env: Env,
+  provider: PaymentProviderId,
+  event: PaidEvent,
+  charge: SubscriptionCharge,
+): Promise<FulfillmentResult> {
+  const db = env.DB
+  const order = await findOrder(db, provider, event)
+  if (!order) {
+    if (event.site && event.site !== site.domain) return { status: 'ignored', orderId: null, note: `order of another site: ${event.site}` }
+    return { status: 'orphan', orderId: null, note: 'subscription order not found' }
+  }
+  if (order.status === 'paid' || order.status === 'refunded') return { status: 'duplicate', orderId: order.id }
+  const now = nowIso()
+  const plan = findPlan(order.package_id)
+  const mismatch = plan
+    ? checkPaidEvent(order, event, expectedProductId(env, provider, order.package_id))
+    : `package ${order.package_id} is not a subscription plan`
+  if (mismatch || !plan) {
+    await markMismatch(db, order.id, event, now)
+    return { status: 'mismatch', orderId: order.id, note: mismatch ?? undefined }
+  }
+  const periodStart = charge.periodStart ?? now
+  const period = {
+    interval: plan.interval,
+    current_period_start: periodStart,
+    current_period_end: charge.periodEnd ?? addInterval(periodStart, plan.interval),
+  }
+  const subscriptionId = createId('sub')
+  const referral = await referralRewardStatements(db, order, (await getSettings(env)).referralRewardCredits, now)
+  const statements = [
+    ...ledgerStatements(db, {
+      userId: order.user_id,
+      delta: order.credits,
+      reason: 'subscription',
+      refId: order.id,
+      idempotencyKey: `order:${order.id}`,
+      expiresAt: grantWindow(period, 0).expiresAt,
+    }),
+    db
+      .prepare(
+        `INSERT INTO subscriptions (id, user_id, provider, provider_subscription_id, provider_customer_id, plan_id, interval,
+         credits_per_month, amount_cents, currency, status, cancel_at_period_end, current_period_start, current_period_end,
+         current_order_id, grants_done, next_grant_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 0, ?, ?, ?, 1, ?, ?, ?)`,
+      )
+      .bind(
+        subscriptionId,
+        order.user_id,
+        provider,
+        charge.providerSubscriptionId,
+        charge.providerCustomerId ?? null,
+        plan.id,
+        plan.interval,
+        order.credits,
+        order.amount_cents,
+        order.currency,
+        period.current_period_start,
+        period.current_period_end,
+        order.id,
+        nextGrantAt(period, 1),
+        now,
+        now,
+      ),
+    db
+      .prepare(
+        `UPDATE orders SET status = 'paid', paid_at = ?, updated_at = ?, subscription_id = ?,
+         provider_order_id = COALESCE(?, provider_order_id), provider_payment_id = COALESCE(?, provider_payment_id),
+         paid_amount = ?, paid_currency = ?, paid_amount_cents = ? WHERE id = ?`,
+      )
+      .bind(
+        now,
+        now,
+        subscriptionId,
+        event.providerOrderId,
+        event.providerPaymentId,
+        event.paidAmount,
+        event.paidCurrency,
+        event.paidAmountCents,
+        order.id,
+      ),
+  ]
+  try {
+    await batchWithOptional(db, statements, referral)
+  } catch (error) {
+    if (isUniqueConstraintError(error)) return { status: 'duplicate', orderId: order.id }
+    throw error
+  }
+  return { status: 'processed', orderId: order.id }
+}
+
+async function applySubscriptionRenewal(
+  env: Env,
+  provider: PaymentProviderId,
+  event: PaidEvent,
+  charge: SubscriptionCharge,
+  sub: SubscriptionRow,
+): Promise<FulfillmentResult> {
+  const db = env.DB
+  if (!event.providerPaymentId) return { status: 'mismatch', orderId: sub.current_order_id, note: 'subscription charge without payment id' }
+  const now = nowIso()
+  const orderId = `ord_${(await sha256Hex(`${provider}:${event.providerPaymentId}`)).slice(0, 24)}`
+  const mismatch = checkPaidEvent(
+    { package_id: sub.plan_id, amount_cents: sub.amount_cents, currency: sub.currency },
+    event,
+    expectedProductId(env, provider, sub.plan_id),
+  )
+  // 周期：支付商给了就用；没给（Waffo）时，若状态事件已先把订阅推进到新的一期就沿用，否则从付款时间起算一期
+  const keepPeriod =
+    !charge.periodStart && sub.current_period_start && sub.current_period_end && Date.parse(sub.current_period_end) > Date.now() + 86400_000
+  const periodStart = charge.periodStart ?? (keepPeriod ? sub.current_period_start! : now)
+  const period = {
+    interval: sub.interval,
+    current_period_start: periodStart,
+    current_period_end: charge.periodEnd ?? (keepPeriod ? sub.current_period_end! : addInterval(periodStart, sub.interval)),
+  }
+  // 续费订单沿用当期订单的归因字段，按渠道统计的收入包含续费
+  const insertOrder = (status: 'paid' | 'pending') =>
+    db
+      .prepare(
+        `INSERT INTO orders (id, user_id, provider, package_id, credits, amount_cents, currency, status, provider_order_id,
+         provider_payment_id, paid_amount, paid_currency, paid_amount_cents, subscription_id, source, medium, campaign, country,
+         device, attribution, created_at, paid_at, updated_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, o.source, o.medium, o.campaign, o.country,
+         o.device, o.attribution, ?15, ?16, ?15
+         FROM (SELECT 1) LEFT JOIN orders o ON o.id = ?17`,
+      )
+      .bind(
+        orderId,
+        sub.user_id,
+        provider,
+        sub.plan_id,
+        sub.credits_per_month,
+        sub.amount_cents,
+        sub.currency,
+        status,
+        charge.providerSubscriptionId,
+        event.providerPaymentId,
+        event.paidAmount,
+        event.paidCurrency,
+        event.paidAmountCents,
+        sub.id,
+        now,
+        status === 'paid' ? now : null,
+        sub.current_order_id,
+      )
+  if (mismatch) {
+    try {
+      await insertOrder('pending').run()
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error
+    }
+    return { status: 'mismatch', orderId, note: mismatch }
+  }
+  try {
+    await db.batch([
+      insertOrder('paid'),
+      ...ledgerStatements(db, {
+        userId: sub.user_id,
+        delta: sub.credits_per_month,
+        reason: 'subscription',
+        refId: orderId,
+        idempotencyKey: `order:${orderId}`,
+        expiresAt: grantWindow(period, 0).expiresAt,
+      }),
+      // 续费成功说明没有取消（或已在门户恢复）；逾期补扣成功回到 active，已终止的订阅只补积分不改状态
+      db
+        .prepare(
+          `UPDATE subscriptions SET current_order_id = ?, current_period_start = ?, current_period_end = ?, grants_done = 1,
+           next_grant_at = ?, provider_customer_id = COALESCE(?, provider_customer_id),
+           status = CASE WHEN status IN ('active', 'past_due') THEN 'active' ELSE status END,
+           cancel_at_period_end = CASE WHEN status IN ('active', 'past_due') THEN 0 ELSE cancel_at_period_end END,
+           updated_at = ? WHERE id = ?`,
+        )
+        .bind(orderId, period.current_period_start, period.current_period_end, nextGrantAt(period, 1), charge.providerCustomerId ?? null, now, sub.id),
+    ])
+  } catch (error) {
+    if (isUniqueConstraintError(error)) return { status: 'duplicate', orderId }
+    throw error
+  }
+  return { status: 'processed', orderId }
+}
+
+// 订阅状态事件：只更新事件里给出的字段；事件时间早于已应用的状态时丢弃（webhook 可能乱序，本地取消也会推进 state_at）。
+// 支付商发起的换套餐按新套餐更新每月积分和价格，下次续费按新价格核对
+async function applySubscriptionState(env: Env, provider: PaymentProviderId, event: SubscriptionEvent): Promise<FulfillmentResult> {
+  const db = env.DB
+  const sub = await findSubscription(db, provider, event.providerSubscriptionId)
+  if (!sub) {
+    if (event.site && event.site !== site.domain) return { status: 'ignored', orderId: null, note: `subscription of another site: ${event.site}` }
+    // 首付的付款事件还没到（或首付核对不符没建订阅）：状态以之后的扣款为准
+    return { status: 'ignored', orderId: null, note: 'subscription not found' }
+  }
+  const occurredAt = event.occurredAt && !Number.isNaN(Date.parse(event.occurredAt)) ? new Date(event.occurredAt).toISOString() : null
+  if (occurredAt && sub.state_at && occurredAt < sub.state_at) {
+    return { status: 'ignored', orderId: sub.current_order_id, note: 'stale subscription event' }
+  }
+  const now = nowIso()
+  const products = providerProducts(env, provider)
+  const planId = event.planId ?? Object.keys(products).find((id) => event.productId && products[id] === event.productId) ?? null
+  const plan = planId && planId !== sub.plan_id ? findPlan(planId) : undefined
+  const next = {
+    ...sub,
+    status: event.status ?? sub.status,
+    cancel_at_period_end: event.cancelAtPeriodEnd === null ? sub.cancel_at_period_end : event.cancelAtPeriodEnd ? 1 : 0,
+    current_period_start: event.periodStart ?? sub.current_period_start,
+    current_period_end: event.periodEnd ?? sub.current_period_end,
+    provider_customer_id: event.providerCustomerId ?? sub.provider_customer_id,
+    ...(plan ? { plan_id: plan.id, interval: plan.interval, credits_per_month: plan.credits, amount_cents: plan.priceCents, currency: plan.currency } : {}),
+  }
+  const ended = next.status === 'canceled' || next.status === 'expired'
+  // 年付补发和当期积分的到期时间跟着周期走：同一期内的校正（付款时推算的周期与支付商相差几小时，
+  // Waffo 的周期还只到日期）重算下次补发、对齐当期批次的到期时间；已经是新的一期（续费扣款还没到）先停发，等扣款入账时重新开始
+  let nextGrant = sub.next_grant_at
+  let align: D1PreparedStatement | null = null
+  if (ended) nextGrant = null
+  else if (
+    (next.current_period_start !== sub.current_period_start || next.current_period_end !== sub.current_period_end) &&
+    next.current_period_start &&
+    next.current_period_end
+  ) {
+    const sameCycle = sub.current_period_start && Math.abs(Date.parse(next.current_period_start) - Date.parse(sub.current_period_start)) < 2 * 86400_000
+    nextGrant = sameCycle ? nextGrantAt(next, sub.grants_done) : null
+    if (sameCycle && sub.current_order_id && sub.grants_done > 0) {
+      align = alignSubscriptionGrantStatement(db, {
+        subscriptionId: sub.id,
+        orderId: sub.current_order_id,
+        periodStart: next.current_period_start,
+        periodEnd: next.current_period_end,
+        expiresAt: grantWindow(next, sub.grants_done - 1).expiresAt,
+      })
+    }
+  }
+  const update = db
+    .prepare(
+      `UPDATE subscriptions SET status = ?, cancel_at_period_end = ?, current_period_start = ?, current_period_end = ?,
+       provider_customer_id = ?, plan_id = ?, interval = ?, credits_per_month = ?, amount_cents = ?, currency = ?,
+       next_grant_at = ?, ended_at = ?, state_at = COALESCE(?, state_at), updated_at = ?
+       WHERE id = ? AND (state_at IS NULL OR ? IS NULL OR state_at <= ?)`,
+    )
+    .bind(
+      next.status,
+      next.cancel_at_period_end,
+      next.current_period_start,
+      next.current_period_end,
+      next.provider_customer_id,
+      next.plan_id,
+      next.interval,
+      next.credits_per_month,
+      next.amount_cents,
+      next.currency,
+      nextGrant,
+      ended ? (sub.ended_at ?? now) : null,
+      occurredAt,
+      now,
+      sub.id,
+      occurredAt,
+      occurredAt,
+    )
+  const [result] = await db.batch(align ? [update, align] : [update])
+  if (!result!.meta.changes) return { status: 'ignored', orderId: sub.current_order_id, note: 'stale subscription event' }
+  return { status: 'processed', orderId: sub.current_order_id }
+}
+
 export interface RefundInput {
   refundKey: string // 同一笔退款重试时不变（支付商 refund id）
   amountCents: number | null // null = 全额退剩余部分
@@ -115,14 +489,18 @@ export async function refundOrder(db: D1Database, order: OrderRow, refund: Refun
   const plan = planRefund(order, refund)
   if (!plan) return false
   const now = nowIso()
+  const referral = await referralClawbackStatements(db, order, now)
   try {
-    await db.batch([
+    await batchWithOptional(db, [
       ...clawbackStatements(db, {
         userId: order.user_id,
         maxAmount: plan.credits,
         reason: 'order_refund',
         refId: order.id,
         idempotencyKey: `order_refund:${order.id}:${refund.refundKey}`,
+        preferRefId: order.id,
+        // 订阅积分按期作废，只回收这张订单发的批次，不扣用户另买的积分包
+        onlyPreferred: !!order.subscription_id,
         note: plan.full ? refund.note : `${refund.note} (partial ${plan.amountCents}/${plan.paidCents})`,
       }),
       db
@@ -131,12 +509,23 @@ export async function refundOrder(db: D1Database, order: OrderRow, refund: Refun
            status = ?, refunded_at = ?, updated_at = ? WHERE id = ? AND status = 'paid'`,
         )
         .bind(plan.credits, plan.amountCents, plan.full ? 'refunded' : 'paid', now, now, order.id),
-    ])
+    ], referral)
   } catch (error) {
     if (isUniqueConstraintError(error)) return false
     throw error
   }
   return true
+}
+
+// 先带上可选语句（邀请奖励的发放或回收）执行；可选语句里的断言失败（并发下已被别的订单或退款处理）时去掉它们重试
+async function batchWithOptional(db: D1Database, statements: D1PreparedStatement[], optional: D1PreparedStatement[]) {
+  if (!optional.length) return db.batch(statements)
+  try {
+    return await db.batch([...statements, ...optional])
+  } catch (error) {
+    if (!isCheckConstraintError(error)) throw error
+    return db.batch(statements)
+  }
 }
 
 // 后台"仅记账"退款的幂等键（与退款 webhook 共用 order_refund:<orderId>:<key>）：
@@ -178,7 +567,15 @@ export function planRefund(order: RefundableOrder, refund: Pick<RefundInput, 'am
   return { full, paidCents, credits, amountCents: refund.amountCents! }
 }
 
-async function findOrder(db: D1Database, provider: PaymentProviderId, event: Exclude<PaymentEvent, { kind: 'ignored' }>) {
+async function findOrder(db: D1Database, provider: PaymentProviderId, event: Exclude<PaymentEvent, { kind: 'ignored' | 'subscription' }>) {
+  // 订阅续费的退款事件里 orderId 仍是首单号（checkout 元数据跟着订阅走），先按支付号找到具体那一期的订单
+  if (event.kind === 'refunded' && event.providerPaymentId) {
+    const order = await db
+      .prepare('SELECT * FROM orders WHERE provider = ? AND provider_payment_id = ?')
+      .bind(provider, event.providerPaymentId)
+      .first<OrderRow>()
+    if (order) return order
+  }
   if (event.orderId) {
     const order = await db
       .prepare('SELECT * FROM orders WHERE id = ? AND provider = ?')
@@ -207,7 +604,7 @@ async function recordEvent(
   provider: PaymentProviderId,
   event: PaymentEvent,
   orderId: string | null,
-  status: 'processed' | 'ignored' | 'failed',
+  status: EventStatus,
   error: string | null,
   payload: string,
 ) {

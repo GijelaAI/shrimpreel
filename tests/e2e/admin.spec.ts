@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import { ORIGIN, buyPackage, credits, devLogin, json, ledger, post, uniqueEmail } from './helpers'
 
@@ -14,6 +15,42 @@ test('未登录与普通用户进不了后台，后台接口同样拒绝', async
   await expect(page.getByTestId('admin-denied')).toContainText('不是管理员')
   expect((await page.request.get('/api/admin/stats')).status()).toBe(403)
   expect((await post(page.request, '/api/admin/users/x/credits', { delta: 100, note: 'self' })).status()).toBe(403)
+})
+
+// 本地 Worker 读取的密钥（.dev.vars，没有时 wrangler 也不会注入）：只用于断言接口没有回传它们的值
+function localSecrets() {
+  if (!existsSync('.dev.vars')) return {}
+  const pairs = readFileSync('.dev.vars', 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.match(/^([A-Z0-9_]+)=(.*)$/))
+    .filter((m): m is RegExpMatchArray => Boolean(m))
+  return Object.fromEntries(pairs.map((m) => [m[1]!, m[2]!.replace(/^(['"])(.*)\1$/, '$2')]))
+}
+
+test('后台概览显示上线配置检查：本地开发配置报错，接口只回传问题不回传密钥值', async ({ page }) => {
+  await devLogin(page.request, ADMIN_EMAIL)
+  const response = await page.request.get('/api/admin/stats')
+  const body = await response.text()
+  const { config } = JSON.parse(body) as { config: { level: string; key: string; message: string }[] }
+  expect(config).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ level: 'error', key: 'APP_ENV' }),
+      expect.objectContaining({ level: 'error', key: 'PAYMENT_PROVIDER' }),
+      expect.objectContaining({ level: 'error', key: 'SITE_URL' }),
+    ]),
+  )
+  // 本地 Worker 的绑定齐全：缺绑定说明代码与 wrangler.jsonc 脱节
+  expect(config.map((i) => i.key)).not.toContain('bindings')
+  const leaked = Object.entries(localSecrets())
+    .filter(([, value]) => value.length >= 8 && body.includes(value))
+    .map(([name]) => name)
+  expect(leaked).toEqual([])
+
+  await page.goto('/admin')
+  const card = page.getByTestId('admin-config')
+  await expect(card).toContainText('上线配置检查')
+  await expect(card).toContainText('APP_ENV=development')
+  await expect(card).toContainText('npm run doctor')
 })
 
 test('管理员调整积分与封禁：余额、流水、审计、会话同步生效', async ({ page, playwright }) => {

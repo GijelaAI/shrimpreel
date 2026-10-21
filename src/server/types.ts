@@ -48,6 +48,32 @@ export interface OrderRow {
   paid_at: string | null
   refunded_at: string | null
   updated_at: string
+  last_reconciled_at: string | null
+  subscription_id: string | null // 订阅扣款订单所属的订阅
+}
+
+export interface SubscriptionRow {
+  id: string
+  user_id: string
+  provider: string
+  provider_subscription_id: string
+  provider_customer_id: string | null
+  plan_id: string
+  interval: 'month' | 'year'
+  credits_per_month: number
+  amount_cents: number
+  currency: string
+  status: 'active' | 'past_due' | 'canceled' | 'expired'
+  cancel_at_period_end: number
+  current_period_start: string | null
+  current_period_end: string | null
+  current_order_id: string | null
+  grants_done: number
+  next_grant_at: string | null
+  state_at: string | null
+  created_at: string
+  updated_at: string
+  ended_at: string | null
 }
 
 export interface GenerationRow {

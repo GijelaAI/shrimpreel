@@ -7,8 +7,10 @@ function stats(overrides: Partial<HealthStats> = {}): HealthStats {
   return {
     generations: { finished: 40, failed: 1, topErrors: 'provider_error ×1' },
     deadLetters: 0,
+    providerAccount: { count: 0, detail: null },
     backlog: 0,
     webhookFailures: { count: 0, latest: null },
+    paymentReview: { count: 0, latest: null },
     emailFailures: 2,
     ...overrides,
   }
@@ -40,6 +42,11 @@ describe('evaluateHealth', () => {
     expect(
       kinds(stats({ deadLetters: 1, backlog: 1, webhookFailures: { count: 1, latest: 'waffo order.paid: boom' }, emailFailures: 3 })),
     ).toEqual(['dead_letter', 'job_backlog', 'payment_webhook', 'email_failures'])
+    const review = evaluateHealth(stats({ paymentReview: { count: 1, latest: 'dodo payment.succeeded mismatch ord_1: paid 1 < price 990 USD' } }))[0]
+    expect(review).toMatchObject({ kind: 'payment_review', count: 1, windowMinutes: 1440 })
+    // 服务商余额不足：1 个就告警，不等失败率（40 个里只失败 1 个也报）
+    const account = evaluateHealth(stats({ providerAccount: { count: 1, detail: 'YIR_INSUFFICIENT_BALANCE ×1' } }))
+    expect(account).toEqual([{ kind: 'provider_account', count: 1, total: null, windowMinutes: 60, detail: 'YIR_INSUFFICIENT_BALANCE ×1' }])
     const webhook = evaluateHealth(stats({ webhookFailures: { count: 2, latest: 'dodo payment.succeeded: boom' } }))[0]
     expect(webhook).toMatchObject({ kind: 'payment_webhook', count: 2, detail: 'dodo payment.succeeded: boom' })
   })

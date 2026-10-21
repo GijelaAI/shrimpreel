@@ -5,9 +5,10 @@
 本地全部可用。模板本身不部署上线（2026-10-20 决定），线上验证随第一个热词站进行。下文提到的 `.tmp/` 工件不入库，只在作者本机。
 
 - 已验证：
-  - 检查与构建：`npm run typecheck`；`npm test`（85 个单元测试）；`npm run build`。
-  - e2e：`npm run test:e2e`（43 个用例全部通过，2026-10-21）。
+  - 检查与构建：`npm run typecheck`；`npm test`（181 个单元测试）；`npm run build`。
+  - e2e：`npm run test:e2e`（62 个用例全部通过，2026-10-21）。
   - SEO：`npm run seo:check`（20 个页面 0 error）。
+  - 支付商 sandbox（2026-10-21，`SANDBOX_WEBHOOK=1`，经隧道收真实 webhook）：Dodo 付款、拒付、部分退款 3 个用例通过，订阅用例的首付、激活、积分和门户通过，取消续费因 test 密钥缺 Subscriptions 写入返回 403；Waffo 付款、拒付和订阅 3 个用例全部通过。
 - 模板全面评审（2026-10-20）中不需要产品决策的 P0/P1 已在本地完成：
   - 工程：GitHub Actions CI（typecheck、单元测试、build，e2e 单独一个 job 并上传报告；Playwright 在 CI 重试 1 次）；README 改为 upstream remote 的多站升级流程。
   - SEO 与内链：文章改为可扩展集合（`site.articles`）；`/guides` 列表页进入导航和页脚；文章页有相关文章和可见面包屑，价格页面包屑与 BreadcrumbList 一致；FAQ、价格页、联系页链接到文章；语言切换改为可抓取的 `<a hreflang>`；sitemap `lastmod` 按页面取。
@@ -23,7 +24,7 @@
   - 联系和举报表单接入 Turnstile；支付结果页从地址栏去掉 `email`。
   - 说明见 README 的“合规与内容安全”。
 - P1-9 交易邮件已在本地完成（Cloudflare Email Service，D1 发件箱去重、退避重试、后台邮件页），工件在 `.tmp/transactional-email/`。说明见 README 的“交易邮件”。
-- 监控告警已在本地完成：Cron 健康检查（生成失败率、死信、积压、支付回调、邮件），按 6 小时时间桶去重发给 `ADMIN_EMAILS`；死信队列由同一 Worker 消费，判失败并退积分。说明见 README 的“监控告警”。
+- 监控告警已在本地完成：Cron 健康检查（生成失败率、死信、积压、支付回调、付款待核对、邮件），按 6 小时时间桶去重发给 `ADMIN_EMAILS`；死信队列由同一 Worker 消费，判失败并退积分。说明见 README 的“监控告警”。
 - GA4 同意横幅已在本地完成：Consent Mode v2 basic 模式，接受前不加载 gtag.js，撤回时删除 `_ga` 系列 Cookie；页脚可重新打开；隐私政策按统计配置自动调整。默认配置不启用 GA4（推荐 Cloudflare Web Analytics），浏览器流程用临时 `ga4Id` 验证过一次。说明见 README 的“合规与内容安全”。
 - CSP 与 Permissions-Policy 已在本地完成：页面下发 `Content-Security-Policy-Report-Only`，内联脚本用每次请求的 nonce，违规写 `[csp]` 日志。dev 与生产构建下公开页、生成流程、后台、GA4 同意后加载均为零违规。**仍是 Report-Only**，上线观察无误报后再改为强制执行。说明见 README 的“关键设计”。
 - 开源前安全排查（2026-10-20）已在本地完成，报告在 `.tmp/security-audit/report.md`（只在作者本机，不入库）：
@@ -70,11 +71,27 @@
   - 拒付卡 → `payment.failed` → 订单 failed。
 
   工件在 `.tmp/template-review/dodo-e2e/`。
+- 模板增强计划 #2 支付回调一致性已在本地完成（2026-10-21），工件在 `.tmp/payment-consistency/`：paid 事件入账前核对商品和同币种实收金额，不符记 `mismatch`、找不到订单记 `orphan`，新增“付款待核对”告警和后台筛选；退款先于付款到达时返回 5xx 等支付商重试（之前会丢掉这笔退款）。说明见 README 的“关键设计”。
+- 模板增强计划 #1 主动对账已在本地完成（2026-10-21），工件在 `.tmp/order-reconcile/`：`PaymentProvider.fetchPaidEvent` 向支付商查单（Dodo 查 checkout session 再取 payment，Waffo 用 GraphQL 按商户订单号查），查到的付款复用 `processPaymentEvent` 入账；成功页 pending 约 15 秒和 60 秒时各查一次，5 分钟 Cron 按指数退避扫 10 分钟到 24 小时的 pending 订单，后台订单详情加“查单”。用 test 凭据对本地 6 笔真实 Waffo/Dodo test 订单只读查单，金额、支付单号、商品 ID 与本地记录一致，失败订单查不到付款。迁移 `0008_order_reconcile.sql` 给 orders 加 `last_reconciled_at`，部署前执行 `npm run db:migrate:remote`。说明见 README 的“关键设计”。
+- 模板增强计划 #3 部署前体检已在本地完成（2026-10-21），工件在 `.tmp/config-doctor/`：`npm run doctor`（`npm run deploy` 先跑）按 wrangler 配置检查 `APP_ENV`、站点域名、误用 mock、所选服务商的密钥名（`wrangler secret list`）、商品映射、绑定与占位资源 id、Cron 与死信队列、远端未应用的 migration；后台概览加“上线配置检查”卡片，按运行时 env 跑同一套规则（`src/server/config-health.ts`），只显示问题不显示值。远端分支只验证了“查不到 Worker、查不到 D1”时的报错；已部署 Worker 的 secret 列表和远端 migration 输出要等第一个热词站核对。说明见 README 的“部署到 Cloudflare”。
+- 模板增强计划 #4 线上只读巡检已在本地完成（2026-10-21），工件在 `.tmp/smoke-prod/`：`SMOKE_BASE_URL=<地址> npm run test:smoke`（独立配置 `playwright.smoke.config.ts`，用例在 `tests/smoke/`），只发 GET 和必然被拒的 POST，UA 带 bot 标识不计入访问报表。生产环境的 `/checkout/mock` 页面改为直接 404。用本机生产模式预览（`wrangler dev` + https）验证：production 和 staging 各 9 个通过；故意留 mock 支付商、把 staging 当 production 巡检、对开发模式巡检，分别报出对应的失败项，开发模式下没有发出任何开发接口请求。真实域名上的巡检随第一个热词站进行。说明见 README 的“部署到 Cloudflare”。
+- 模板增强计划 #5 已完成（2026-10-21），工件在 `.tmp/agent-docs/`：根目录 `AGENTS.md` 只写代码里看不出来的约定（积分走 `ledgerStatements`、支付事件走 `processPaymentEvent` 及两处有据可查的例外、新增环境变量要同步的位置、生产环境必须关闭的入口、双语文案、迁移命名、e2e 单实例），`CLAUDE.md` 只引用它；`docs/env.md` 列出全部 vars、secret、`site.ts` 上线字段和它们的生效时机；`docs/payments.md` 写明支付商代码的职责、webhook 返回码语义和新增支付商的清单。文档里引用的路径和符号已逐一核对。
+- 模板增强计划 #14 已完成（2026-10-21），工件在 `.tmp/e2e-catalog/`：`tests/e2e/CATALOG.md` 把 48 个 e2e 用例和 4 个巡检用例按风险归类（P0：资金与积分、权限与安全、合规与用户数据、主路径；P1：邮件、告警、安全响应头、SEO、运营），每条写断言要点；另列只由单元测试覆盖的逻辑，以及 12 项没有 e2e 的风险、原因和计划（真实支付商、真实视频生成与 fal 回调、真实发信、Google 登录、Turnstile、OpenAI 审核、限流、真实队列与 Cron、争议、Cookie 横幅、移动端与其他浏览器、线上巡检）。`tests/unit/catalog.test.ts` 双向核对：目录引用的标题必须存在，`tests/e2e` 的每个用例必须登记；故意写错标题、删掉一条登记都能报出来。
+- 模板增强计划 #25 已完成（2026-10-21），工件在 `.tmp/new-hot-site/`：Claude Code skill `.claude/skills/new-hot-site/` 入库（`.gitignore` 只放行这一个 skill），把一句话需求整理成站点简介，按白名单只改站点差异文件，缺的信息写成 `TODO(site): …`；`npm run doctor` 扫描 `site.ts`、`src/content/*.ts`、`wrangler.jsonc` 里的 `TODO(site)`，正式环境报错、其它环境提醒。在模板快照的沙箱里按 skill 派生了 Moon Hop 站（域名未定、没有素材），typecheck、单元测试、build、seo:check（0 error、0 warn）都通过，doctor 列出的 4 处 TODO 和写入的一致。实测修了模板的 4 个问题：派生站删掉 `wrangler.staging.jsonc` 后 `npm test` 会失败（跳过的 describe 仍会读文件）；占位素材脚本和 e2e 的 global-setup 写死了 `neon-shuffle-v1-*` 文件名，改为跟 `site.durations` 走；价格、隐私、条款、退款页的中文描述和英文联系页描述在品牌名较短时低于 70 个宽度，已加长。
+- 模板增强计划 #11 已完成（2026-10-21），工件在 `.tmp/sync-upstream/`（同步）和 `.tmp/launch-audit/`（上线体检）：
+  - 同步：`scripts/sync-plan.mjs` 只读出同步计划。基线取 `git merge-base HEAD upstream/main`，所以站点只能 `git merge`。计划把模板改动分成共用代码、站点层、站点已删除、依赖锁四层，列出两边都改过的文件、站点改过的共用文件、新 migration、新增 vars 和密钥。skill `.claude/skills/sync-upstream/` 用模板最新版的脚本出计划，按层解决冲突、补本地配置、跑完整验证，合并停在暂存区；提交带 `Template-sync: <sha>` trailer。
+  - 同步的沙箱验证：从模板快照派生 Moon Hop 站，站点改了文案和主色；模板再加一个提交（新 var、新密钥、改 staging 配置）。计划正确分层，标出站点改过的 `src/styles.css`。合并出现 en.ts 和 staging 配置两个冲突，按 skill 处理后 typecheck、单元测试、build、seed、e2e 48 个、seo:check 都通过，提交后再出计划显示已是最新。没有共同历史、目标 ref 不存在都给出明确报错。e2e 的新 global-setup 暴露了测试站的源视频没按新 `template.id` 改名，已写进 skill。另外发现 Windows Git Bash 会改写 `git show <ref>:<路径>`，要加 `MSYS_NO_PATHCONV=1`。
+  - 上线体检：skill `.claude/skills/launch-audit/` 只读，依次跑部署前检查、线上检查（seo:check、smoke、HTTPS、R2 源视频、移动端 Lighthouse 和截图）和人工清单，报告给出三档结论。对本机生产模式预览实跑一遍：smoke 9 个通过，Lighthouse 移动端 95 分，故意缺的 18s 源视频被查出 404，在线 doctor 和 R2 生命周期对未部署的模板给出明确失败，结论“不能上线”符合预期。PageSpeed Insights API 不带 key 返回 429，skill 改为优先用 `PSI_API_KEY`，没有 key 时用本地 Lighthouse。
+  - 未验证：依赖锁冲突后 `npm install` 的路径；真实域名上的上线体检，随第一个热词站进行。
+- 模板增强计划 #12 已完成（2026-10-21），工件在 `.tmp/deploy-workflow/`：
+  - 密钥同步：`scripts/sync-secrets.mjs` 读 `.dev.vars.production`，对比 `wrangler secret list` 出计划（新增、已存在、只在远端、按所选服务商算出的同步后仍缺），只列名字。`--apply` 经 stdin 交给 `wrangler secret bulk`，输出脱敏；已存在的默认不覆盖，远端多出的不删除。文件没被 `.gitignore` 忽略、键名未登记或是 var、空值、占位值、弱 `SESSION_SECRET` 时拒绝写入；读不到远端列表时要加 `--overwrite`。单元测试用 fake wrangler 覆盖这些分支和脱敏；真实 wrangler 跑了 dry-run 和三种拒绝路径，日志里没有出现值。
+  - 部署 workflow：`.github/workflows/deploy.yml.example`，站点复制为 `deploy.yml` 后手动触发：typecheck、单元测试、离线 doctor、`db:migrate:remote`、`npm run deploy`、线上巡检并上传报告。Cloudflare 的“Edit Cloudflare Workers” token 模板不含 D1 和 Queues，README 写明要加 D1 Edit 和 Queues Edit。核对了 wrangler 4.151 源码：CI 里 `d1 migrations apply` 的确认按 yes 继续；`secret bulk` 是 merge-patch，只改列出的键，Worker 不存在时会创建。
+  - 未验证：真实 GitHub Actions 运行、真实 `secret bulk` 写入（都要真实站点，随第一个热词站进行）；actionlint（本机 Docker 未运行，只用 YAML 解析检查过）。
 - 依赖：TanStack Start 1.169、`@cloudflare/vite-plugin` 1.64（miniflare 5 beta）、wrangler 4.151、Vite 8。
 
 ## 未验证
 
-- Dodo：`payment.cancelled`、`refund.failed`、争议事件、收银台折扣码；live 模式（需要开通 live payments）。
+- Dodo：`payment.cancelled`、`refund.failed`、争议事件、收银台折扣码（入账核对靠 `discount_id`/`discounts` 判断用了折扣码，字段取自文档和本地 payload，未用真实折扣码验证）；live 模式（需要开通 live payments）。
 - Waffo 下单时 `language` 参数是否生效；争议/拒付事件（test 模式无法触发）。
 - fal.ai 真实生成：入参和出参按文档实现，没有用真实 `FAL_KEY` 跑过。
 - Google OAuth 和 One Tap 的线上回调。
@@ -97,15 +114,107 @@
   - 账号按邮箱合并：同一邮箱换了 Google 账号（`sub` 不同）仍会登录到原账号。Google 建议用 `sub` 而不是邮箱作为唯一标识。
   - 邮箱移出 `ADMIN_EMAILS` 后不会自动降级，要在后台手动取消管理员（README 已写明）。
   - 注销后用同一邮箱重新注册，可以再领一次注册赠送。
-  - 支付成功回调不核对实付金额和币种。
   - Google 登录没有用 PKCE，One Tap 没有用 nonce。
   - 举报回执发到举报人填写的邮箱，可被用来给任意地址发回执；有限流和 Turnstile。
   - 上传请求缺少 `Content-Length` 时会整体读入内存；fal 成片下载没有大小上限。
-  - `wrangler.jsonc` 默认 `APP_ENV=development`，部署时必须改成 `production`（README 部署第 5 步）。否则 Cookie 不带 Secure，mock 服务商和弱 `SESSION_SECRET` 也不会被拦截。
+  - `wrangler.jsonc` 默认 `APP_ENV=development`，部署时必须改成 `production`（README 部署第 5 步）。否则 Cookie 不带 Secure，mock 服务商和弱 `SESSION_SECRET` 也不会被拦截。`npm run deploy` 先跑的 `npm run doctor` 会拦下；直接 `wrangler deploy` 则不会。
+
+## 模板增强计划（2026-10-21）
+
+来源是对多款商业 SaaS 模板的对标，只借鉴思路，不复制代码。详细分析在 `.tmp/template-benchmark/report.md`（只在作者本机）。编号沿用报告编号，按批次顺序落地：
+
+1. 第一批，第一个热词站上线前完成：
+   - ~~#2~~ 已完成（2026-10-21）。支付回调一致性：找不到订单的 paid 事件记为 orphan 并告警（不返回 5xx，多个站可能共用商户号）；实付金额或币种和订单不一致时不入账、标记并告警；补乱序、金额不符、孤儿事件测试。
+   - ~~#1~~ 已完成（2026-10-21）。支付回跳主动对账：`PaymentProvider` 增加查单方法；成功页长时间 pending 时由服务端向支付商查单，复用 `processPaymentEvent` 入账；Cron 兜底扫描 pending 订单；后台订单详情可手动查单。
+   - ~~#3~~ 已完成（2026-10-21）。部署前体检 `npm run doctor`：检查 `APP_ENV`、所选服务商的必填 secret（只核对名字）、绑定、误用 mock、域名一致；`npm run deploy` 先跑；后台显示配置健康状态。
+   - ~~#4~~ 已完成（2026-10-21）。线上只读 smoke：独立的 Playwright 配置指向线上地址，只做只读断言，包括 mock 和测试接口在生产返回 404。
+   - ~~#5~~ 已完成（2026-10-21）。`AGENTS.md`（`CLAUDE.md` 只引用它）加按模块拆分的 docs：`docs/env.md` 环境变量表、`docs/payments.md` 支付商接入。派生新站的流程 README 已经写全，没有再拆一份。
+   - ~~#14~~ 已完成（2026-10-21）。e2e 验收目录 `tests/e2e/CATALOG.md`：按 P0/P1 列出每个风险对应的用例和断言要点，单列未覆盖项和原因；单元测试核对目录和用例一致。
+2. 第二批，多站复用：
+   - ~~#25~~ 已完成（2026-10-21）。新站 quick-start skill `.claude/skills/new-hot-site/`：一句话需求整理成固定字段的站点简介，只改白名单文件，缺失信息写成 `TODO(site)`（doctor 在正式环境拦下），最后 typecheck、test、build、`seo:check` 和离线 doctor。
+   - ~~#11~~ 已完成（2026-10-21）。上游同步 skill `sync-upstream` 和同步计划脚本 `scripts/sync-plan.mjs`（按层合并，基线取 merge-base，提交带 `Template-sync` trailer）；上线体检 skill `launch-audit`（只读，报告给出能否上线的结论）。
+   - ~~#12~~ 已完成（2026-10-21）。部署 workflow 示例（手动触发：migrate → deploy → smoke）和 secrets 同步脚本（先 dry-run 列差异）。
+   - ~~#13~~ 已完成（2026-10-21）。Waffo 与 Dodo 的 sandbox e2e（`tests/sandbox`，`npm run test:sandbox`）：真实收银台和测试卡，验证成功卡只入账一次、拒付不入账；没有隧道时靠查单入账，`SANDBOX_WEBHOOK=1` 时再验证 webhook 去重和 Dodo 部分退款。默认不进 CI，说明见 `docs/payments.md`。webhook 模式已手动跑过（2026-10-21），两家 setup 脚本都支持 `--webhook-id` 改 test webhook 地址。
+   - ~~#26~~ 已完成（2026-10-21）。首页可选转化区块：痛点（`problem`）和“自己拍 vs 用本站”逐行对比（`withWithout`），文案设为 `null` 就不渲染；套餐可选 `anchorPriceCents` 划线原价和“Save X%”，只能填真实卖过的价格。不加评价区块：新站没有真实评价。
+   - ~~#33~~ 已完成（2026-10-21）。可选的 yir.ai 视频服务商，见下文。
+3. 第三批，变现：
+   - ~~#6~~ 已完成（2026-10-21）。积分分批次与过期，见下文。
+   - ~~#9~~ 已完成（2026-10-21）。兑换码，见下文。
+   - ~~#8~~ 已完成（2026-10-21）。邀请奖励（只发积分，不发现金），见下文。
+   - ~~#10~~ 已完成（2026-10-21）。后台运营参数与服务商连接测试（密钥不进数据库），见下文。
+   - ~~#7~~ 已完成（2026-10-21）。订阅（月付、年付），见下文。
+4. P2 按需：运维脚本、群聊付款通知、营销邮件订阅、多家统计、在线客服、`llms.txt`、协作模板、Demo 模式、RBAC、只读的“以用户身份查看”、AdSense 开关、回信转发、仅邀请注册、注册来源问卷、dependabot。
+
+**#33 yir.ai 视频服务商**（群友建议，2026-10-21 评估并接入）
+
+- 第二个可选 `VideoProvider`（`VIDEO_PROVIDER=yir`，密钥 `YIR_API_KEY`，配置 `site.video.yir`），默认仍用 fal。用法见 README 的“视频服务商”。
+- 不替换 fal 的原因：yir 没有 fal `wan/v2.2-14b/animate/replace` 这类角色替换模型。接入用 Kling 2.6 Motion Control（reference 模式：照片 + 模板源视频）。
+- 已实现：
+  - 提交带 `Idempotency-Key`（任务 id）；照片签名地址按任务创建时间生成，重新提交时请求体不变，避免 409。
+  - webhook（`/api/webhooks/yir`，只有 https 地址才带）只作为“该去查了”的信号，结果用密钥重新拉取；成片出来后立即转存 R2。
+  - 失败一律退积分，按 yir 的 `retryable` 决定重投还是判失败；账单已结算时记实际成本，否则按 `costCentsPerSecond` 估算。
+  - 没配 Key、Key 失效、余额不足、Key 月度额度用完时触发“视频服务商账户”告警，1 个就告警；doctor 和后台配置检查要求 `YIR_API_KEY`。
+  - 测试：`tests/unit/yir.test.ts` 按 yir 文档构造响应，覆盖提交、查询、错误映射和成本；smoke 巡检检查未签名的 yir 回调返回 401。
+- 和原计划不同的地方：
+  - 不带 `max_cost`：yir 对用 URL 引用素材的请求拒绝 `max_cost`。单价按参考视频秒数计，模板源视频时长固定；整体花费改为在 yir Console 给 Key 设月度额度。
+  - `routing.only` 默认不限定（`routingOnly: null`，按 Key 的 Routing Profile 选，可故障切换）：Kling Motion Control 在 yir 上有哪些渠道还没确认，锁死渠道后无法切换。需要限定时填渠道 ID，隐私政策列出实际渠道。
+- 未验证（2026-10-21 决定模板不做实测，只交付功能）：没有用真实 key 跑过；Motion Control 的效果、单价（`costCentsPerSecond: 7` 是估算）和结算时机，由选用 yir 的热词站自己用 3–5 条真实素材验证。
+- README 里的 yir 链接是作者的推荐链接，已在 README 中披露；代码和默认配置不带推荐标识。
+
+**#6 积分分批次与过期**（2026-10-21）
+
+- 迁移 `0009_credit_grants.sql`：批次表 `credit_grants`、扣减明细 `credit_allocations`、断言表 `credit_guard`；现有余额转成永不过期的 `legacy` 批次。
+- 扣费先扣最早到期的批次（永不过期的最后扣），分配用窗口函数在 SQL 里算，`credit_guard` 的 CHECK 保证扣足，否则整个 batch 回滚；不需要应用层先读后写，并发不会超扣。
+- 生成失败按明细原路退回（迁移前扣费的任务退成新批次）；退款回收先扣该订单的批次；Cron 每 5 分钟作废到期批次并写 `expire` 流水，扣费前也先作废该用户的到期批次。
+- 入口：`site.signupBonusValidDays`、后台补发有效期、账单页到期提示、后台用户详情的批次表、导出数据含 `creditGrants`。
+- 测试：`tests/unit/credits.test.ts`（`node:sqlite` 上执行全部迁移，每步核对流水之和 = 缓存余额 = 批次剩余之和）；e2e `credits.spec.ts`（先扣限时积分、失败原路退回、到期作废、并发扣费）。
+- 未验证：线上 D1 执行迁移 0009 和窗口函数（本地 miniflare 已通过）；单个用户批次很多时的扣费性能（每次扣费扫描该用户剩余 > 0 的批次，有 `(user_id, expires_at)` 索引）。上线前需要 `npm run db:migrate:remote`。
+
+**#9 兑换码**（2026-10-21）
+
+- 迁移 `0010_redeem_codes.sql`：`redeem_codes`（积分、可用次数、已用次数、积分有效期、兑换截止、停用时间）和 `redeem_uses`（每个账号每个码一行，主键 `(code, user_id)`）。
+- 后台 `/admin/redeem-codes`：一次生成最多 1000 个随机码（一条 `json_each` 语句插入整批，不受 D1 查询数和参数个数限制）或一个指定活动码，按批导出 CSV（BOM、防公式注入），停用；生成和停用写审计日志。
+- 用户在设置页兑换（`POST /api/redeem`），按用户和 IP 限流，配置了 Turnstile 时需要人机验证。兑换得到 `redeem` 批次，复用 #6 的到期与扣费规则。
+- 并发：预检查只用来给出准确错误码；batch 里带条件写兑换记录，`credit_guard` 断言写入成功，再加次数（`used_count <= max_uses` 的 CHECK 兜底）和发积分。
+- 测试：`tests/unit/redeem.test.ts`（码的格式；在 `node:sqlite` 上跑兑换，包括预检查之后码被用完或停用）；e2e `redeem.spec.ts`（后台生成、CSV、停用、设置页兑换、各种拒绝、5 人并发兑换 3 次的活动码）。
+- 未验证：线上 D1 执行迁移 0010（需要 `npm run db:migrate:remote`）；配置 Turnstile 后的兑换（与留言、举报共用同一套校验，单元测试覆盖）。
+
+**#8 邀请奖励**（2026-10-21）
+
+- 迁移 `0011_referrals.sql`：`users.referral_code`（唯一，第一次打开设置页时生成）和 `referrals`（每个被邀请人一行，记邀请人、IP 哈希、状态、奖励订单）。
+- 流程：`/i/<码>` 写 `vt_ref` Cookie（30 天）→ 新用户注册时在同一个 batch 里绑定 → 首单付款时和购买入账同一个 batch 给邀请人发 `referral` 积分 → 奖励订单退款时整笔回收（`referral_refund`，最多扣到 0）。
+- 规则在 `site`：`referralRewardCredits`（默认 10，0 = 关闭）、`referralMaxPerIp`（同一邀请人同一 IP 最多 3 个注册，超出的记为拒绝）、`referralMonthlyCap`（每个邀请人任意 30 天最多 20 次奖励，已回收的也计入）。付款时邀请人已封禁或注销则不发。
+- 并发：发奖励和回收都带 `credit_guard` 断言，断言失败时去掉奖励部分重跑 batch，购买入账和退款本身不受影响；同一被邀请人两单并发入账只发一次，两笔退款并发只回收一次。
+- 入口：设置页邀请卡片（链接、复制、统计），后台 `/admin/referrals`（按时间范围的邀请人排行和最近邀请），导出数据含双方各自一侧的记录，隐私政策在功能开启时说明 Cookie 和 IP 哈希。
+- 测试：`tests/unit/referrals.test.ts`（在 `node:sqlite` 上跑绑定、发奖、上限、并发、回收）；e2e `referrals.spec.ts`（链接注册、首单奖励、退款回收、无效码和老用户、同 IP 上限、后台页面、导出数据）。
+- 未验证：线上 D1 执行迁移 0011（需要 `npm run db:migrate:remote`）；线上 `cf-connecting-ip` 的真实取值（本地只能模拟回环地址）；奖励金额和上限是默认值，热词站按客单价调整。
+
+**#10 运营设置与测试连接**（2026-10-21）
+
+- 迁移 `0012_settings.sql`：`settings`（key、JSON 值、修改人、修改时间），另给 `generations.created_at` 加索引供每日上限计数。
+- 参数（`src/server/settings.ts`，后台 `/admin/settings`）：维护模式、各语言全站公告、注册赠送积分与有效期、邀请奖励积分、全站每日生成上限。只存和 `site.ts` 不同的值，保存成默认值时删行；读取走 KV（`settings:v1`，`cacheTtl` 60 秒），保存时用 D1 当前值刷新 KV；存值不合法或字段已删除时回退默认值。每次修改写审计，记录前后值；只写有变化的项。
+- 生效点：维护模式拦生成和下单（503，管理员放行），支付回调、登录、查看照常；公告和维护提示经 `/api/me` 下发；每日上限按 UTC 自然日计数，预检查给出 429，并发由 batch 里的 `credit_guard` 断言兜底；注册赠送、邀请奖励改读运营参数。`site.referralRewardCredits` 为 0 时邀请奖励锁定为 0（隐私政策按 `site.ts` 生成）；运营参数设为 0 时暂停邀请，暂停期间付款的首单记为 `paused` 拒绝，恢复后不会用之后的订单补发。
+- 测试连接（`src/server/probes.ts`）：R2、KV 写读删；发信给管理员发测试邮件；Dodo 逐个套餐查商品核对价格和币种（低于 `site.ts` 为失败，因为付款会被判金额不符）；Waffo 用不存在的订单号查单验证签名；fal、yir 查余额（低于 5 美元提示，fal Key 没有 billing 权限时只提示）；OpenAI 查审核模型。只读或自行清理，说明里的密钥值替换为 `***`，每次测试写审计。
+- 测试：`tests/unit/settings.test.ts`（提交校验、合并、KV 缓存、每日上限在 SQLite 上回滚）、`tests/unit/probes.test.ts`（各服务商分支与脱敏）、`tests/unit/referrals.test.ts` 新增暂停用例；e2e `settings.spec.ts` 6 个（权限与校验、注册赠送与审计、维护模式、公告、每日上限、后台页面与测试连接）。另用 `.dev.vars` 的 test 凭据实测 Dodo、Waffo 的支付探测，结果都是正常，输出里没有密钥值。
+- 测试单元的 D1 外壳补了 `first(column)` 语义和 KV 外壳；`admin.spec.ts` 的密钥泄露检查原来只去双引号，`.dev.vars` 里单引号的值实际没被检查，已修正。
+- 未验证：线上 D1 执行迁移 0012（需要 `npm run db:migrate:remote`）；线上 KV `cacheTtl` 60 秒的实际生效延迟；fal、yir、OpenAI 的真实探测（需要真实 key）；真实发信的测试邮件投递。
+
+**#7 订阅**（2026-10-21）
+
+- 迁移 `0013_subscriptions.sql`：`subscriptions`（支付商订阅号、套餐、锁定的每期价格、状态、到期取消、当期起止、当期订单、年付补发进度、最近状态事件时间），`orders.subscription_id`。
+- 开关 `site.subscriptionsEnabled`（默认开），套餐在 `site.plans`，默认月付 $14.90、年付 $149，每月都发 60 积分。关掉开关只停卖新订阅（定价页、条款和 FAQ 隐藏，下单拒绝套餐，doctor、测试连接和 setup 跳过套餐），已有订阅照常续费和管理。使用手册 [docs/subscriptions.md](docs/subscriptions.md)，规则和两家支付商的差异见 [docs/payments.md](docs/payments.md) 的“订阅”。
+- 每次扣款一张订单（续费订单号由支付商付款 ID 派生，重复投递只建一次），积分是当月结束作废的 `subscription` 批次，复用 #6 的到期与扣费规则；年付由 Cron 按月补发。状态事件按发生时间防乱序。退款只回收这张订单发过的订阅批次，之后停止补发。
+- 入口：定价页的订阅区（年付显示相对月付的折扣）；账单页订阅卡片（续费日、到期取消与撤销、扣款失败提示、客户门户）；后台用户详情的订阅表；同一时间只能有一个订阅，还会续费时不能注销账号。条款、退款政策和 FAQ 按是否开订阅生成。
+- 支付商：Dodo 用 API 取消和撤销，门户按客户 ID 现取；Waffo 用 API 取消，撤销只能在客户门户里操作，门户需要新变量 `WAFFO_STORE_ID`。setup 脚本为套餐建订阅商品并订阅相关 webhook 事件；doctor 检查套餐有商品、Waffo 有 `WAFFO_STORE_ID`；Dodo 测试连接也核对套餐价格。
+- 测试：`tests/unit/subscriptions.test.ts`（日历月相加、补发窗口、首付、续费、金额不符、逾期恢复、乱序、退款、Dodo 和 Waffo 事件映射）；e2e `subscriptions.spec.ts` 2 个（月付全流程含账单页操作、年付补发与退款），截图在 `.tmp/subscriptions/`；新的 mock 和 dev 端点（连同 #6 的 `/api/dev/expire-credits`）登记进了 smoke 的 404 列表。
+- 不支持：换套餐（在支付商门户里关掉）、试用期、暂停。
+- test 店铺实测（2026-10-21）：两家都用 setup 脚本建了月付、年付商品，sandbox 订阅用例经隧道收真实 webhook。Waffo 首付、激活、当月积分、门户、取消续费全部通过；Dodo 首付、激活、积分和门户地址通过，取消续费返回 403（test 密钥缺 Subscriptions 写入）。
+- 实测发现并修复：Waffo 首付事件不带周期，本站先按付款时间推算，之后状态事件给出的周期只到日期，当月积分的到期时间和当期结束对不上。现在状态事件校正周期时，和订阅的更新放进同一个 batch 对齐当期批次的到期时间（`alignSubscriptionGrantStatement`，乱序的旧事件不改），有单元测试；测试用的 D1 外壳 batch 补上每条语句的 `meta.changes`。
+- 未验证：真实续费和扣款失败（test 模式触发不了）；Dodo 的取消与撤销（补上密钥权限后重跑 `--grep 订阅`）；Dodo 订阅商品的 `subscription_period_count` 设成 10 年是否合适；线上 D1 执行迁移 0013（需要 `npm run db:migrate:remote`）。默认开启订阅和定价是产品取舍，热词站按需调整。
 
 ## 下一步
 
-按 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 的“建议顺序”推进：
+按上面的“模板增强计划”推进（第一、二、三批已完成，剩 P2 按需项）。其余事项按 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 的“建议顺序”推进：
 
 1. 部署第一个热词站：
    - 上线前决定上文“已知问题”里安全相关的待定项。
@@ -121,4 +230,4 @@
    - 错误追踪：前端错误目前只进 Workers Logs，堆栈是压缩后的行列号；需要 source map 还原或聚合告警时换成 Sentry。
    - `vt_attr` 归因 Cookie 不在同意横幅之后；主要面向欧盟用户时移到同意之后。
    - 订单详情页提供发票下载：Dodo 可由服务端代理 `GET /invoices/payments/{payment_id}`（返回 PDF，每条记录每分钟限 5 次），未实测；Waffo 由支付商直接给买家发收据和发票，没有找到公开的下载接口，详情页继续提示查收邮件。
-4. P2（等有数据再定）：每篇文章单独的 og 图、视频 sitemap、`apple-touch-icon` 与 web manifest、海报改 webp/avif、公开页 SSR HTML 边缘缓存、全局每日生成上限、邮箱 magic link 登录、订阅与推荐奖励、营销邮件、后台 webhook 手动重放与复购 cohort。
+4. P2（等有数据再定）：每篇文章单独的 og 图、视频 sitemap、`apple-touch-icon` 与 web manifest、海报改 webp/avif、公开页 SSR HTML 边缘缓存、邮箱 magic link 登录、营销邮件、后台 webhook 手动重放与复购 cohort。

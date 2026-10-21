@@ -17,7 +17,7 @@ type EventRow = {
   created_at: string
 }
 
-// 支付 webhook 记录：failed 的事件通常需要对照支付商后台人工补单
+// 支付 webhook 记录：failed / orphan / mismatch 的事件需要对照支付商后台人工补单或退款
 function AdminEvents() {
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
@@ -26,7 +26,7 @@ function AdminEvents() {
 
   return (
     <AdminPage title="支付事件">
-      <p className="text-sm text-muted">每个 webhook 事件按 (支付商, 事件 ID) 去重。处理失败的事件请到支付商后台核对，确认已收款后在「订单」页补单。</p>
+      <p className="text-sm text-muted">每个 webhook 事件按 (支付商, 事件 ID) 去重。处理失败、找不到订单或金额/商品与订单不符的付款都没有入账，请到支付商后台核对：确认已足额收款后在「订单」页补单，否则在支付商后台退款。</p>
       <FilterSelect
         label="状态"
         value={status}
@@ -39,6 +39,8 @@ function AdminEvents() {
           ['processed', '已处理'],
           ['ignored', '已忽略'],
           ['failed', '失败'],
+          ['orphan', '找不到订单'],
+          ['mismatch', '金额/商品不符'],
         ]}
       />
       <LoadState loading={loading && !data} error={error} empty={!!data && !rows.length} />

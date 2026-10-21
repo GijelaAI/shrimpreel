@@ -1,20 +1,19 @@
+import { isWeakSessionSecret } from './config-health'
 import { ApiError, base64Url, constantTimeEqual, hmacSha256, isProduction } from './util'
-
-// .dev.vars.example 里的占位值：模板公开后人人都知道，生产环境不能用
-const EXAMPLE_SESSION_SECRET = 'change-me-to-a-long-random-string'
 
 // 生产环境的签名密钥缺失、过短或仍是示例值时拒绝签名，而不是签出可伪造的 URL
 function signingSecret(env: Env) {
   const secret = env.SESSION_SECRET ?? ''
-  if (isProduction(env) && (secret.length < 32 || secret === EXAMPLE_SESSION_SECRET)) {
+  if (isProduction(env) && isWeakSessionSecret(secret)) {
     throw new ApiError(503, 'server_misconfigured', 'SESSION_SECRET is missing, shorter than 32 characters, or still the example value')
   }
   return secret
 }
 
 // 给视频 provider 拉取用户上传图片用的短期签名 URL：/media/uploads/<uploadId>?exp=&sig=
-export async function signedUploadUrl(env: Env, uploadId: string, ttlSeconds = 2 * 3600) {
-  const exp = Math.floor(Date.now() / 1000) + ttlSeconds
+// issuedAtMs 固定时 URL 也固定：同一任务重新提交时请求体不变（yir 的幂等键按请求体识别）
+export async function signedUploadUrl(env: Env, uploadId: string, issuedAtMs = Date.now(), ttlSeconds = 2 * 3600) {
+  const exp = Math.floor(issuedAtMs / 1000) + ttlSeconds
   const sig = base64Url(await hmacSha256(signingSecret(env), `upload:${uploadId}:${exp}`))
   return `${env.SITE_URL.replace(/\/$/, '')}/media/uploads/${uploadId}?exp=${exp}&sig=${sig}`
 }

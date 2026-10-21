@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
-import { findDuration, findPackage, isLocale, localePath, site } from '#/config/site'
+import { findDuration, findPackage, findPlan, isLocale, localePath, sellingPlans, site } from '#/config/site'
 import { safeRedirectPath } from '#/lib/redirect'
 import { exportFileName, exportUserData } from './account-export'
 import { adminRoutes } from './admin'
@@ -9,7 +9,7 @@ import { runHealthCheck } from './alerts'
 import { classifyTouch, deviceFromUserAgent, requestAttribution, sanitizeTouch } from './attribution'
 import { endSession, loadSessionUser, publicUser, startSession, upsertUser } from './auth'
 import { CLIENT_ERROR_PATH, summarizeClientError } from './client-error'
-import { clawbackStatements, ledgerStatements } from './credits'
+import { clawbackStatements, expireStatements, ledgerStatements } from './credits'
 import { CSP_REPORT_PATH, summarizeCspReports } from './csp'
 import { exchangeGoogleCode, googleAuthRedirect, googleClientId, googleOAuthConfig, verifyGoogleIdToken } from './google'
 import { publicGeneration, publicOrder, rateLimit, readJson, requireUser, pageParams } from './http'
@@ -17,14 +17,27 @@ import { enqueueJob, failGeneration, handleDeadLetter, handleVideoJob } from './
 import { jobToken, serveR2Object, sniffImageType, verifyUploadSignature } from './media'
 import { getModerationProvider } from './moderation'
 import { processPaymentEvent } from './orders'
+import { reconcileOrder, reconcilePendingOrders } from './reconcile'
+import { normalizeCode, redeemCode } from './redeem'
+import { REFERRAL_COOKIE, ensureReferralCode, normalizeReferralCode, referralSummary, requestReferral } from './referrals'
+import { assertOpen, dailyCapGuard, generationsToday, getSettings, publicNotice, referralActive } from './settings'
 import { seoRoutes } from './seo'
 import { notifyContactMessage, runTakedownReminders } from './notifications'
 import { normalizeDodoEvent, verifyDodoWebhook } from './payments/dodo'
-import { getPaymentProvider } from './payments'
+import { getOrderProvider, getPaymentProvider, mockPaidKey } from './payments'
 import type { PaymentEvent } from './payments/types'
 import { WebhookVerificationError } from './payments/types'
 import { normalizeWaffoEvent, verifyWaffoWebhook, waffoEnvironment } from './payments/waffo'
 import { sweepExpiredMedia } from './retention'
+import {
+  addInterval,
+  grantDueSubscriptions,
+  latestSubscription,
+  liveSubscription,
+  publicSubscription,
+  setCancelAtPeriodEnd,
+  subscriptionRef,
+} from './subscriptions'
 import { createTakedown, isBlockedMedia, parseTakedown, type TakedownInput } from './takedown'
 import { turnstileSiteKey, verifyTurnstile } from './turnstile'
 import type { AppContext, GenerationRow, OrderRow, UploadRow, UserRow } from './types'
@@ -92,7 +105,7 @@ app.post(CLIENT_ERROR_PATH, async (c) => {
   return c.body(null, 204)
 })
 
-app.get('/api/me', (c) => {
+app.get('/api/me', async (c) => {
   const user = c.get('user')
   return c.json({
     user: user ? publicUser(user) : null,
@@ -101,6 +114,7 @@ app.get('/api/me', (c) => {
       devLogin: !isProduction(c.env),
       paymentProvider: c.env.PAYMENT_PROVIDER,
       turnstileSiteKey: turnstileSiteKey(c.env),
+      notice: publicNotice(await getSettings(c.env)),
     },
   })
 })
@@ -140,6 +154,7 @@ app.get('/api/auth/google/callback', async (c) => {
       country: c.req.header('cf-ipcountry') ?? null,
       locale: null,
       attribution: requestAttribution(c, 'first'),
+      referral: await requestReferral(c),
     })
     await startSession(c, user.id)
   } catch (error) {
@@ -165,6 +180,7 @@ app.post('/api/auth/google/one-tap', async (c) => {
     country: c.req.header('cf-ipcountry') ?? null,
     locale: null,
     attribution: requestAttribution(c, 'first'),
+    referral: await requestReferral(c),
   })
   await startSession(c, user.id)
   return c.json({ user: publicUser(user) })
@@ -183,6 +199,7 @@ app.post('/api/auth/dev-login', async (c) => {
     country: null,
     locale: null,
     attribution: requestAttribution(c, 'first'),
+    referral: await requestReferral(c),
   })
   await startSession(c, user.id)
   return c.json({ user: publicUser(user) })
@@ -237,6 +254,8 @@ app.post('/api/uploads', async (c) => {
 
 app.post('/api/generations', async (c) => {
   const user = requireUser(c)
+  const settings = await getSettings(c.env)
+  assertOpen(settings, user)
   await rateLimit(c.env.GENERATE_LIMITER, user.id)
   const body = await readJson<{ uploadId: string; durationId: string; mockOutcome: string; locale: string }>(c)
   const duration = findDuration(body.durationId ?? '')
@@ -252,6 +271,8 @@ app.post('/api/generations', async (c) => {
     .bind(user.id)
     .first<{ n: number }>()
   if ((active?.n ?? 0) >= MAX_ACTIVE_JOBS_PER_USER) throw new ApiError(429, 'too_many_active_jobs')
+  const cap = settings.generationDailyCap
+  if (cap > 0 && (await generationsToday(db, nowIso())) >= cap) throw new ApiError(429, 'daily_limit')
   await rememberLocale(c.env, user, body.locale)
 
   const providerId = activeVideoProviderId(c.env)
@@ -275,9 +296,14 @@ app.post('/api/generations', async (c) => {
         refId: id,
         idempotencyKey: `generation:${id}`,
       }),
+      ...dailyCapGuard(db, cap, now),
     ])
   } catch (error) {
-    if (isCheckConstraintError(error)) throw new ApiError(402, 'insufficient_credits')
+    // 余额断言和每日上限断言都是 CHECK 失败：回滚后按当天的任务数区分
+    if (isCheckConstraintError(error)) {
+      if (cap > 0 && (await generationsToday(db, now)) >= cap) throw new ApiError(429, 'daily_limit')
+      throw new ApiError(402, 'insufficient_credits')
+    }
     throw error
   }
 
@@ -348,12 +374,68 @@ app.get('/api/credits/ledger', async (c) => {
   return c.json({ balance: user.credits, entries: rows.results })
 })
 
+// 即将到期的积分（账单页提示），按到期时间排序
+app.get('/api/credits/expiring', async (c) => {
+  const user = requireUser(c)
+  const rows = await c.env.DB.prepare(
+    `SELECT SUM(remaining) AS credits, expires_at AS expiresAt FROM credit_grants
+     WHERE user_id = ? AND remaining > 0 AND expires_at > ? GROUP BY expires_at ORDER BY expires_at LIMIT 5`,
+  )
+    .bind(user.id, nowIso())
+    .all<{ credits: number; expiresAt: string }>()
+  return c.json({ expiring: rows.results })
+})
+
+// 邀请链接：只写 cookie 再跳首页（?ref=invite 让来源报表记为 invite），注册时服务端读 cookie 绑定邀请人
+app.get('/i/:code', async (c) => {
+  const code = normalizeReferralCode(c.req.param('code'))
+  if (code && referralActive(await getSettings(c.env))) {
+    setCookie(c, REFERRAL_COOKIE, code, { httpOnly: true, secure: isProduction(c.env), sameSite: 'Lax', path: '/', maxAge: 30 * 86400 })
+  }
+  c.header('X-Robots-Tag', 'noindex')
+  return c.redirect('/?ref=invite', 302)
+})
+
+// 邀请卡片：第一次打开时生成邀请码
+app.get('/api/referral', async (c) => {
+  const user = requireUser(c)
+  const { referralRewardCredits } = await getSettings(c.env)
+  if (referralRewardCredits <= 0) return c.json({ enabled: false })
+  const code = await ensureReferralCode(c.env.DB, user.id)
+  return c.json({
+    enabled: true,
+    code,
+    url: `${new URL(c.req.url).origin}/i/${code}`,
+    rewardCredits: referralRewardCredits,
+    ...(await referralSummary(c.env.DB, user.id)),
+  })
+})
+
+// 兑换码（设置页）：按用户和 IP 限流，先校验格式再消耗 Turnstile token
+app.post('/api/redeem', async (c) => {
+  const user = requireUser(c)
+  const ip = c.req.header('cf-connecting-ip')
+  await rateLimit(c.env.AUTH_LIMITER, `redeem:${user.id}`)
+  await rateLimit(c.env.AUTH_LIMITER, `redeem-ip:${ip ?? 'local'}`)
+  const body = await readJson<{ code: string; turnstileToken: string }>(c)
+  const code = normalizeCode(body.code)
+  if (!code) throw new ApiError(400, 'invalid_code')
+  await verifyTurnstile(c.env, body.turnstileToken, ip)
+  const result = await redeemCode(c.env.DB, user.id, code)
+  const balance = await c.env.DB.prepare('SELECT credits FROM users WHERE id = ?').bind(user.id).first<number>('credits')
+  return c.json({ ...result, balance })
+})
+
 app.post('/api/checkout', async (c) => {
   const user = requireUser(c)
+  assertOpen(await getSettings(c.env), user)
   await rateLimit(c.env.AUTH_LIMITER, `checkout:${user.id}`)
   const body = await readJson<{ packageId: string; locale: string }>(c)
-  const pack = findPackage(body.packageId ?? '')
+  // packageId 可以是积分包或在售的订阅套餐（订阅开关关掉时套餐不能再下单）
+  const pack = findPackage(body.packageId ?? '') ?? sellingPlans.find((p) => p.id === body.packageId)
   if (!pack) throw new ApiError(400, 'invalid_package')
+  // 同一时间只允许一个订阅；已到期取消且当期结束的不算（见 LIVE_SUBSCRIPTION_SQL）
+  if (findPlan(pack.id) && (await liveSubscription(c.env.DB, user.id))) throw new ApiError(409, 'subscription_exists')
   const locale = isLocale(body.locale) ? body.locale : 'en'
   await rememberLocale(c.env, user, body.locale)
   const provider = getPaymentProvider(c.env)
@@ -401,6 +483,46 @@ app.post('/api/checkout', async (c) => {
   }
 })
 
+// ---------- 订阅（账单页）----------
+
+app.get('/api/subscription', async (c) => {
+  const user = requireUser(c)
+  const sub = await latestSubscription(c.env.DB, user.id)
+  const provider = sub ? getOrderProvider(c.env, sub.provider) : null
+  return c.json({
+    subscription: sub ? publicSubscription(sub) : null,
+    // Waffo 不能由商户撤销取消，账单页改为引导去客户门户
+    canResume: !!provider?.resumeSubscription,
+    canPortal: !!provider?.portalUrl,
+  })
+})
+
+app.post('/api/subscription/cancel', async (c) => {
+  const user = requireUser(c)
+  await rateLimit(c.env.AUTH_LIMITER, `subscription:${user.id}`)
+  return c.json({ subscription: publicSubscription(await setCancelAtPeriodEnd(c.env, user, true)) })
+})
+
+app.post('/api/subscription/resume', async (c) => {
+  const user = requireUser(c)
+  await rateLimit(c.env.AUTH_LIMITER, `subscription:${user.id}`)
+  return c.json({ subscription: publicSubscription(await setCancelAtPeriodEnd(c.env, user, false)) })
+})
+
+// 支付商的客户门户：换卡、看发票、取消或恢复。地址有时效，每次点击现取
+app.post('/api/subscription/portal', async (c) => {
+  const user = requireUser(c)
+  await rateLimit(c.env.AUTH_LIMITER, `subscription:${user.id}`)
+  const body = await readJson<{ locale?: string }>(c)
+  const sub = await latestSubscription(c.env.DB, user.id)
+  if (!sub) throw new ApiError(404, 'subscription_not_found')
+  const provider = getOrderProvider(c.env, sub.provider)
+  if (!provider?.portalUrl) throw new ApiError(409, 'subscription_portal_unsupported')
+  const locale = isLocale(body.locale) ? body.locale : 'en'
+  const returnUrl = `${c.env.SITE_URL.replace(/\/$/, '')}${localePath(locale, '/dashboard/billing')}`
+  return c.json({ url: await provider.portalUrl(subscriptionRef(sub, user), returnUrl) })
+})
+
 app.get('/api/orders', async (c) => {
   const user = requireUser(c)
   const { limit, offset } = pageParams(c)
@@ -419,7 +541,25 @@ app.get('/api/orders/:id', async (c) => {
   return c.json({ order: publicOrder(order), credits: user.credits })
 })
 
-// mock 支付：模拟支付商回调，走与真实 webhook 完全相同的入账逻辑；amountCents 用于模拟部分退款
+// 成功页久等未到账时请求服务端向支付商查单（webhook 丢失或延迟）。只接受订单号，付款状态一律以支付商返回为准；
+// 同一订单 10 秒内只查一次，查单失败不影响页面继续轮询
+app.post('/api/orders/:id/reconcile', async (c) => {
+  const user = requireUser(c)
+  await rateLimit(c.env.AUTH_LIMITER, `reconcile:${user.id}`)
+  const id = c.req.param('id')
+  const order = await c.env.DB.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').bind(id, user.id).first<OrderRow>()
+  if (!order) throw new ApiError(404, 'not_found')
+  const status = await reconcileOrder(c.env, order, { minIntervalMs: 10_000 })
+  const latest = await c.env.DB.prepare('SELECT * FROM orders WHERE id = ?').bind(id).first<OrderRow>()
+  const credits = await c.env.DB.prepare('SELECT credits FROM users WHERE id = ?').bind(user.id).first<number>('credits')
+  return c.json({ reconcile: status, order: publicOrder(latest!), credits })
+})
+
+// mock 支付：模拟支付商回调，走与真实 webhook 完全相同的入账逻辑；amountCents 用于模拟部分退款。
+// paid 的可选字段模拟异常回调（e2e 用）：paidAmountCents / paidCurrency / packageId / discounted 和订单不一致，
+// orphan 让事件指向不存在的订单，site 模拟共用商户号的其他站点；
+// deliver: false 模拟“支付商已收款但 webhook 丢失”：只记下付款，等主动对账（reconcile）查到
+
 app.post('/api/mock-payments/complete', async (c) => {
   if (!isLocalDevRequest(c)) throw new ApiError(404, 'not_found')
   const user = requireUser(c)
@@ -428,6 +568,13 @@ app.post('/api/mock-payments/complete', async (c) => {
     outcome: 'paid' | 'failed' | 'refunded'
     eventId: string
     amountCents?: number
+    paidAmountCents?: number
+    paidCurrency?: string
+    packageId?: string
+    discounted?: boolean
+    orphan?: boolean
+    site?: string
+    deliver?: boolean
   }>(c)
   const order = await c.env.DB.prepare(`SELECT * FROM orders WHERE id = ? AND user_id = ? AND provider = 'mock'`)
     .bind(body.orderId ?? '', user.id)
@@ -435,18 +582,30 @@ app.post('/api/mock-payments/complete', async (c) => {
   if (!order) throw new ApiError(404, 'not_found')
   const outcome = body.outcome ?? 'paid'
   const eventId = body.eventId ?? `mock_${outcome}_${order.id}`
+  const paidCents = Number.isInteger(body.paidAmountCents) ? body.paidAmountCents! : order.amount_cents
+  const ref = body.orphan ? `${order.id}_orphan` : order.id
+  // 订阅套餐的首付：带上订阅信息，周期从现在起算一期
+  const plan = findPlan(order.package_id)
+  const now = nowIso()
+  const subscription = plan
+    ? { providerSubscriptionId: `mock_sub_${ref}`, periodStart: now, periodEnd: addInterval(now, plan.interval) }
+    : null
   const event: PaymentEvent =
     outcome === 'paid'
       ? {
           kind: 'paid',
           eventId,
           eventType: 'mock.paid',
-          orderId: order.id,
-          providerOrderId: `mock_order_${order.id}`,
-          providerPaymentId: `mock_pay_${order.id}`,
-          paidAmount: (order.amount_cents / 100).toFixed(2),
-          paidCurrency: order.currency,
-          paidAmountCents: order.amount_cents,
+          orderId: ref,
+          providerOrderId: `mock_order_${ref}`,
+          providerPaymentId: `mock_pay_${ref}`,
+          paidAmount: (paidCents / 100).toFixed(2),
+          paidCurrency: body.paidCurrency ?? order.currency,
+          paidAmountCents: paidCents,
+          packageId: body.packageId ?? order.package_id,
+          discounted: body.discounted === true,
+          site: body.site ?? null,
+          subscription,
         }
       : outcome === 'refunded'
         ? {
@@ -454,14 +613,89 @@ app.post('/api/mock-payments/complete', async (c) => {
             eventId,
             eventType: 'mock.refunded',
             orderId: order.id,
-            providerPaymentId: null,
+            providerPaymentId: order.provider_payment_id,
             refundId: eventId,
             refundAmountCents: Number.isInteger(body.amountCents) && body.amountCents! > 0 ? body.amountCents! : null,
             originalAmountCents: null,
           }
         : { kind: 'failed', eventId, eventType: 'mock.failed', orderId: order.id }
+  if (body.deliver === false) {
+    if (event.kind !== 'paid') throw new ApiError(400, 'invalid_request')
+    await c.env.KV.put(mockPaidKey(order.id), JSON.stringify({ ...event, eventId: `reconcile:${event.providerPaymentId}` }), {
+      expirationTtl: 86400,
+    })
+    return c.json({ status: 'stored', orderId: order.id })
+  }
   const result = await processPaymentEvent(c.env, 'mock', event, JSON.stringify({ eventId, outcome, orderId: order.id }))
   return c.json(result)
+})
+
+// mock 订阅：模拟支付商的续费扣款和状态 webhook（作用于当前用户最近的 mock 订阅）。
+// renew 按订阅锁定的价格扣下一期（paidAmountCents 模拟金额不符）；其余动作是状态事件，occurredAt 模拟乱序到达
+app.post('/api/mock-payments/subscription', async (c) => {
+  if (!isLocalDevRequest(c)) throw new ApiError(404, 'not_found')
+  const user = requireUser(c)
+  const body = await readJson<{
+    action: 'renew' | 'past_due' | 'recover' | 'cancel_at_period_end' | 'uncancel' | 'canceled' | 'expired'
+    eventId?: string
+    occurredAt?: string
+    paidAmountCents?: number
+  }>(c)
+  const sub = await latestSubscription(c.env.DB, user.id)
+  if (!sub || sub.provider !== 'mock') throw new ApiError(404, 'subscription_not_found')
+  const eventId = body.eventId ?? `mock_${body.action}_${createId('evt')}`
+  const firstOrderId = await c.env.DB.prepare('SELECT id FROM orders WHERE subscription_id = ? ORDER BY created_at, id LIMIT 1')
+    .bind(sub.id)
+    .first<string>('id')
+  let event: PaymentEvent
+  if (body.action === 'renew') {
+    const cents = Number.isInteger(body.paidAmountCents) ? body.paidAmountCents! : sub.amount_cents
+    const periodStart = sub.current_period_end ?? nowIso()
+    event = {
+      kind: 'paid',
+      eventId,
+      eventType: 'mock.subscription.renewed',
+      // 和真实支付商一样，续费事件的 orderId 仍是首单号
+      orderId: firstOrderId,
+      providerOrderId: sub.provider_subscription_id,
+      providerPaymentId: `mock_pay_${eventId}`,
+      paidAmount: (cents / 100).toFixed(2),
+      paidCurrency: sub.currency,
+      paidAmountCents: cents,
+      packageId: sub.plan_id,
+      site: null,
+      subscription: { providerSubscriptionId: sub.provider_subscription_id, periodStart, periodEnd: addInterval(periodStart, sub.interval) },
+    }
+  } else {
+    const states = {
+      past_due: { status: 'past_due', cancelAtPeriodEnd: null },
+      recover: { status: 'active', cancelAtPeriodEnd: null },
+      cancel_at_period_end: { status: 'active', cancelAtPeriodEnd: true },
+      uncancel: { status: 'active', cancelAtPeriodEnd: false },
+      canceled: { status: 'canceled', cancelAtPeriodEnd: null },
+      expired: { status: 'expired', cancelAtPeriodEnd: null },
+    } as const
+    const state = body.action && body.action in states ? states[body.action as keyof typeof states] : null
+    if (!state) throw new ApiError(400, 'invalid_request')
+    event = {
+      kind: 'subscription',
+      eventId,
+      eventType: `mock.subscription.${body.action}`,
+      orderId: firstOrderId,
+      providerSubscriptionId: sub.provider_subscription_id,
+      status: state.status,
+      cancelAtPeriodEnd: state.cancelAtPeriodEnd,
+      periodStart: null,
+      periodEnd: null,
+      providerCustomerId: null,
+      productId: null,
+      occurredAt: body.occurredAt ?? nowIso(),
+      site: null,
+    }
+  }
+  const result = await processPaymentEvent(c.env, 'mock', event, JSON.stringify(body))
+  const latest = await latestSubscription(c.env.DB, user.id)
+  return c.json({ ...result, subscription: latest ? publicSubscription(latest) : null })
 })
 
 // ---------- 访问统计（漏斗第一步）----------
@@ -499,16 +733,19 @@ app.post('/api/webhooks/dodo', async (c) => {
   return c.json({ received: true, ...result })
 })
 
-// fal 完成回调：只当作“立即轮询”的信号，真实结果由 jobs.ts 用 API key 拉取
-app.post('/api/webhooks/fal', async (c) => {
-  const generationId = c.req.query('gen') ?? ''
-  const token = c.req.query('token') ?? ''
-  if (!generationId || !constantTimeEqual(token, await jobToken(c.env, generationId))) {
-    throw new WebhookVerificationError('invalid fal job token')
-  }
-  await enqueueJob(c.env, { kind: 'poll', generationId })
-  return c.json({ received: true })
-})
+// 视频服务商完成回调（fal、yir）：只当作“立即轮询”的信号，真实结果由 jobs.ts 用 API key 拉取，
+// 所以只校验地址里的任务 token，不验 yir 的签名头
+for (const provider of ['fal', 'yir']) {
+  app.post(`/api/webhooks/${provider}`, async (c) => {
+    const generationId = c.req.query('gen') ?? ''
+    const token = c.req.query('token') ?? ''
+    if (!generationId || !constantTimeEqual(token, await jobToken(c.env, generationId))) {
+      throw new WebhookVerificationError(`invalid ${provider} job token`)
+    }
+    await enqueueJob(c.env, { kind: 'poll', generationId })
+    return c.json({ received: true })
+  })
+}
 
 // ---------- Contact & account ----------
 
@@ -555,9 +792,12 @@ app.get('/api/account/export', async (c) => {
   return c.json(data)
 })
 
-// 注销：删除上传与生成的媒体，匿名化用户；订单与积分流水按财务要求保留
+// 注销：删除上传与生成的媒体，匿名化用户；订单与积分流水按财务要求保留。
+// 还会自动续费的订阅要先取消（否则注销后支付商仍会继续扣款）
 app.delete('/api/account', async (c) => {
   const user = requireUser(c)
+  const sub = await liveSubscription(c.env.DB, user.id)
+  if (sub && !sub.cancel_at_period_end) throw new ApiError(409, 'subscription_active')
   for (const prefix of [`uploads/${user.id}/`, `outputs/${user.id}/`]) {
     let cursor: string | undefined
     do {
@@ -573,7 +813,7 @@ app.delete('/api/account', async (c) => {
     db.prepare('DELETE FROM email_outbox WHERE user_id = ?').bind(user.id),
     ...clawbackStatements(db, {
       userId: user.id,
-      maxAmount: user.credits,
+      maxAmount: 1_000_000_000, // 全部剩余积分
       reason: 'account_deleted',
       idempotencyKey: `account_deleted:${user.id}`,
     }),
@@ -588,6 +828,17 @@ app.delete('/api/account', async (c) => {
   return c.json({ ok: true })
 })
 
+// 本地 e2e：按“days 天后”给当前用户的年付订阅补发到期的月份（Cron 里同样的补发逻辑）
+app.post('/api/dev/subscription-grants', async (c) => {
+  if (!isLocalDevRequest(c)) throw new ApiError(404, 'not_found')
+  const user = requireUser(c)
+  const { days } = await readJson<{ days: number }>(c)
+  if (typeof days !== 'number' || !Number.isFinite(days) || days < 0) throw new ApiError(400, 'invalid_days')
+  const result = await grantDueSubscriptions(c.env, { now: Date.now() + days * 86400_000, userId: user.id })
+  const row = await c.env.DB.prepare('SELECT credits FROM users WHERE id = ?').bind(user.id).first<{ credits: number }>()
+  return c.json({ ...result, credits: row?.credits ?? 0 })
+})
+
 // 本地 e2e：把当前用户的数据按“days 天后”执行一次保留期清理
 app.post('/api/dev/sweep', async (c) => {
   if (!isLocalDevRequest(c)) throw new ApiError(404, 'not_found')
@@ -595,6 +846,17 @@ app.post('/api/dev/sweep', async (c) => {
   const { days } = await readJson<{ days: number }>(c)
   if (typeof days !== 'number' || !Number.isFinite(days) || days < 0) throw new ApiError(400, 'invalid_days')
   return c.json(await sweepExpiredMedia(c.env, { now: Date.now() + days * 86400_000, userId: user.id }))
+})
+
+// 本地 e2e：按“days 天后”作废当前用户到期的积分批次（Cron 里同样的作废逻辑）
+app.post('/api/dev/expire-credits', async (c) => {
+  if (!isLocalDevRequest(c)) throw new ApiError(404, 'not_found')
+  const user = requireUser(c)
+  const { days } = await readJson<{ days: number }>(c)
+  if (typeof days !== 'number' || !Number.isFinite(days) || days < 0) throw new ApiError(400, 'invalid_days')
+  await c.env.DB.batch(expireStatements(c.env.DB, new Date(Date.now() + days * 86400_000).toISOString(), user.id))
+  const row = await c.env.DB.prepare('SELECT credits FROM users WHERE id = ?').bind(user.id).first<{ credits: number }>()
+  return c.json({ credits: row?.credits ?? 0 })
 })
 
 // 本地 e2e：查看发件箱。本地 send_email binding 只模拟发送（不会真的发出），以发件箱记录为准
@@ -646,6 +908,15 @@ app.post('/api/dev/mock-finish', async (c) => {
   if (!updated.meta.changes) throw new ApiError(404, 'not_found')
   await Promise.all(Array.from({ length: polls }, () => handleVideoJob(c.env, { kind: 'poll', generationId })))
   return c.json({ ok: true })
+})
+
+// 本地 e2e：按“minutes 分钟后”对当前用户的 pending 订单跑一次 Cron 对账
+app.post('/api/dev/reconcile-sweep', async (c) => {
+  if (!isLocalDevRequest(c)) throw new ApiError(404, 'not_found')
+  const user = requireUser(c)
+  const { minutes } = await readJson<{ minutes: number }>(c)
+  if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes < 0) throw new ApiError(400, 'invalid_minutes')
+  return c.json(await reconcilePendingOrders(c.env, { now: Date.now() + minutes * 60_000, userId: user.id }))
 })
 
 // 本地 e2e：立即跑一次健康检查；since 把统计窗口起点固定到测试开始时刻

@@ -3,6 +3,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { site } from '../src/config/site.ts'
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 const demoDir = join(root, 'public', 'demo')
@@ -56,9 +57,9 @@ for (const [name, palette] of Object.entries(palettes)) {
   poster(file, join(demoDir, `${name}.jpg`))
 }
 
-// 生成用模板源视频：每个时长档位一段（provider 输出时长 = 源视频时长）
-for (const seconds of [6, 12, 18]) {
-  video(join(templateDir, `neon-shuffle-v1-${seconds}s.mp4`), palettes.original, seconds)
+// 生成用模板源视频：每个时长档位一段（provider 输出时长 = 源视频时长），文件名跟 site.durations[].source 走
+for (const { seconds, source } of site.durations) {
+  video(join(templateDir, source), palettes.original, seconds)
 }
 
 // 示例“用户照片”（抽象人像剪影）+ e2e 上传 fixture
@@ -71,7 +72,7 @@ ffmpeg(['-i', join(demoDir, 'sample-photo.jpg'), '-vf', 'scale=270:360', '-q:v',
 
 // OG 图：1200x630 渐变 + 品牌名（Windows 用 Georgia，其他系统可改字体路径）
 const font = process.platform === 'win32' ? 'C\\:/Windows/Fonts/georgiab.ttf' : '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf'
-const brand = process.env.BRAND_NAME ?? 'Neon Shuffle AI'
+const brand = process.env.BRAND_NAME ?? site.brandName
 ffmpeg([
   '-f', 'lavfi',
   '-i', `gradients=s=1200x630:c0=0xff2bd6:c1=0x2b1055:c2=0x00e5ff:n=3:d=1,drawtext=fontfile='${font}':text='${brand}':fontsize=88:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-30,drawtext=fontfile='${font}':text='AI Video Generator':fontsize=40:fontcolor=white@0.85:x=(w-text_w)/2:y=(h/2)+60`,

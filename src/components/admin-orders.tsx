@@ -1,3 +1,5 @@
+import { api, errorCode } from '#/lib/api'
+import type { ReconcileStatus } from '#/server/reconcile'
 import { displayToMinor } from '#/server/payments/amount'
 import { adminAction, money, promptNote } from './admin'
 
@@ -61,12 +63,37 @@ async function refund(order: AdminOrder, mode: 'provider' | 'local') {
   return true
 }
 
+const RECONCILE_RESULT: Record<ReconcileStatus, string> = {
+  processed: '支付商确认已付款，已按正常流程入账。',
+  duplicate: '支付商确认已付款，这笔已入过账。',
+  unpaid: '支付商那边没有成功的付款。',
+  mismatch: '查到付款，但金额或商品与订单不符，没有入账。请到支付事件页核对后补单或退款。',
+  review: '这笔订单已有金额/商品不符的付款事件，不再自动查单。请到支付事件页核对后补单或退款。',
+  orphan: '查到的付款对不上本站订单。',
+  ignored: '查到的付款不属于本站。',
+  throttled: '正在查单，请稍后再试。',
+  skipped: '订单已是终态，或该支付商不支持查单。',
+}
+
+async function reconcile(order: AdminOrder) {
+  try {
+    const { status } = await api<{ status: ReconcileStatus }>(`/api/admin/orders/${order.id}/reconcile`, { method: 'POST' })
+    alert(RECONCILE_RESULT[status] ?? status)
+    return status === 'processed' || status === 'duplicate'
+  } catch (err) {
+    const detail = err instanceof Error && err.message !== errorCode(err) ? `
+${err.message}` : ''
+    alert(`查单失败：${errorCode(err)}${detail}`)
+    return false
+  }
+}
+
 async function markPaid(order: AdminOrder) {
-  const note = promptNote(`补单 ${order.id}：发放 ${order.credits} 积分。\n请先在支付商后台确认已收款，并填写凭证（如支付流水号）：`)
+  const note = promptNote(`补单 ${order.id}：发放 ${order.credits} 积分。\n请先点“查单”或在支付商后台确认已收款，并填写凭证（如支付流水号）：`)
   return Boolean(note && (await adminAction(`/api/admin/orders/${order.id}/mark-paid`, { note })))
 }
 
-// 订单列表与订单详情共用的退款 / 补单按钮；操作成功后调用 onDone 刷新
+// 订单列表与订单详情共用的退款 / 查单 / 补单按钮；操作成功后调用 onDone 刷新
 export function OrderActions({ order: o, onDone }: { order: AdminOrder; onDone: () => unknown }) {
   const run = async (action: Promise<boolean>) => {
     if (await action) await onDone()
@@ -90,9 +117,14 @@ export function OrderActions({ order: o, onDone }: { order: AdminOrder; onDone: 
         </button>
       ) : null}
       {o.status === 'pending' || o.status === 'failed' || o.status === 'canceled' ? (
-        <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => run(markPaid(o))} data-testid={`mark-paid-${o.id}`}>
-          补单
-        </button>
+        <>
+          <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => run(reconcile(o))} data-testid={`reconcile-${o.id}`}>
+            查单
+          </button>
+          <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => run(markPaid(o))} data-testid={`mark-paid-${o.id}`}>
+            补单
+          </button>
+        </>
       ) : null}
     </>
   )

@@ -6,9 +6,14 @@ type S = typeof Site
 type ArticleContent = { title: string; description: string; intro: string; sections: Array<{ h: string; p: string[] }> }
 // FAQ 答案可附一条文章链接；锚文本用与文章标题不同的长尾词
 type FaqItem = { q: string; a: string; guide?: { article: ArticleKey; label: string } }
+// 首页可选转化区块，设为 null 就不渲染。痛点只写不用本站时的麻烦，不提产品；对比逐行写“自己做”和“用本站”，不承诺生成效果
+type ProblemBlock = { eyebrow: string; title: string; items: Array<{ title: string; body: string }> }
+type WithWithoutBlock = { eyebrow: string; title: string; without: string; with: string; rows: Array<{ without: string; with: string }> }
 
 export function en(s: S) {
   const k = s.keyword
+  // 是否在卖订阅（site.subscriptionsEnabled 且有套餐），决定订阅相关文案是否出现
+  const subs = s.subscriptionsEnabled && s.plans.length > 0
   const b = s.brandName
   const { uploadDays, outputDays } = s.retention
   const photoRetention = uploadDays > 0 ? `deleted automatically ${uploadDays} days after upload` : 'kept until you delete them'
@@ -18,11 +23,13 @@ export function en(s: S) {
     meta: {
       // 首页 title 不加品牌后缀：品牌通常已含关键词，控制在 60 字符内（seo:check 会校验）
       homeTitle: `${k} AI Video Generator from One Photo`,
-      homeDescription: `Upload one photo and get your own ${k} video in minutes. Same choreography, same framing, starring you. Pay per video with credits that never expire.`,
+      homeDescription: `Upload one photo and get your own ${k} video in minutes. Same choreography, same framing, starring you. ${subs ? 'Buy credits once or subscribe monthly.' : 'Pay per video with credits that never expire.'}`,
       pricingTitle: `Pricing – ${b}`,
-      pricingDescription: `Simple credit packs for ${k} AI videos. Pay once, credits never expire, failed renders are refunded automatically.`,
+      pricingDescription: subs
+        ? `Credit packs and monthly or yearly plans for ${k} AI videos. Pack credits never expire, cancel a plan anytime, failed renders are refunded automatically.`
+        : `Simple credit packs for ${k} AI videos. Pay once, credits never expire, failed renders are refunded automatically.`,
       contactTitle: `Contact – ${b}`,
-      contactDescription: `Questions about billing, a render or partnerships? Reach the ${b} team.`,
+      contactDescription: `Questions about billing, refunds, a failed render or partnerships? Reach the ${b} team, we usually reply within one business day.`,
       signInTitle: `Sign in – ${b}`,
       dashboardTitle: `My videos – ${b}`,
       privacyDescription: `How ${b} collects, uses and protects the photos, videos and account data behind your ${k} AI videos.`,
@@ -100,6 +107,27 @@ export function en(s: S) {
       photoLabel: 'Uploaded photo',
       resultLabel: 'Generated clip',
     },
+    problem: {
+      eyebrow: 'The catch',
+      title: `Joining the ${k} trend is harder than it looks`,
+      items: [
+        { title: 'You have to learn the routine', body: 'Getting every move right takes real practice, and nerves still show once the camera is rolling.' },
+        { title: 'Someone has to film it', body: 'You need a friend or a tripod, plus a background that matches the framing of the original.' },
+        { title: 'The timing is unforgiving', body: 'Half a beat late looks obvious next to the original, so it turns into take after take.' },
+      ],
+    } as ProblemBlock | null,
+    withWithout: {
+      eyebrow: 'Side by side',
+      title: `Filming it yourself vs. using ${b}`,
+      without: 'Filming it yourself',
+      with: `With ${b}`,
+      rows: [
+        { without: 'Learn the choreography first', with: 'No dancing needed, one photo is enough' },
+        { without: 'Find a friend or set up a tripod', with: 'No camera setup' },
+        { without: 'Retake until the timing lines up', with: 'Timing follows the original clip' },
+        { without: 'Edit and export on your phone', with: 'Download a finished MP4' },
+      ],
+    } as WithWithoutBlock | null,
     // 首页关键词区块（one-page SEO）：H2 带关键词，上新词时按趋势本身重写 whatIs
     howTo: {
       eyebrow: 'How it works',
@@ -130,7 +158,12 @@ export function en(s: S) {
         { title: 'Vertical and ready to post', body: `Exports in ${s.template.aspectRatio} so it drops straight into Reels, Shorts or ${s.trendPlatform}.` },
         { title: 'Pick your length', body: 'Grab a short hook or the full routine. You only pay for the seconds you render.' },
         { title: 'Private by default', body: `Uploads are stored privately, used only for your render and ${photoRetention}.` },
-        { title: 'Fair billing', body: 'Credits never expire. If a render fails, the credits go straight back to your balance.' },
+        {
+          title: 'Fair billing',
+          body: subs
+            ? 'Credit packs never expire and plans can be canceled anytime. If a render fails, the credits go straight back to your balance.'
+            : 'Credits never expire. If a render fails, the credits go straight back to your balance.',
+        },
       ],
     },
     ideas: {
@@ -145,9 +178,14 @@ export function en(s: S) {
     },
     pricing: {
       eyebrow: 'Pricing',
-      title: 'Pay once, use whenever',
-      subtitle: '1 credit = 1 second of video. No subscription, no expiry.',
+      title: subs ? 'Pay as you go, or subscribe' : 'Pay once, use whenever',
+      subtitle: subs
+        ? '1 credit = 1 second of video. Buy a pack that never expires, or subscribe for a fresh allowance every month.'
+        : '1 credit = 1 second of video. No subscription, no expiry.',
       popular: 'Most popular',
+      // 锚定价（site.packages[].anchorPriceCents）的划线原价和折扣
+      was: 'Regular price',
+      save: (percent: number) => `Save ${percent}%`,
       buy: 'Buy credits',
       buying: 'Opening checkout…',
       credits: (n: number) => `${n} credits`,
@@ -161,6 +199,21 @@ export function en(s: S) {
         party: { name: 'Party', tagline: 'For you and your friends' },
         squad: { name: 'Squad', tagline: 'For creators and teams' },
       } as Record<string, { name: string; tagline: string }>,
+      // 订阅套餐（site.plans）
+      plansTitle: 'Subscriptions',
+      plansBody: 'Credits are added at the start of every month of your plan and expire when that month ends. Cancel anytime and keep your plan until the period ends.',
+      packsTitle: 'Credit packs',
+      perMonth: '/ month',
+      perYear: '/ year',
+      monthlyCredits: (n: number) => `${n} credits every month`,
+      yearlyMonthly: (price: string) => `${price} / month, billed yearly`,
+      subscribe: 'Subscribe',
+      planBullets: ['Credits refresh every month', 'All video lengths', 'HD MP4 download, no watermark', 'Cancel anytime'],
+      plans: {
+        monthly: { name: 'Monthly', tagline: 'Flexible, cancel anytime' },
+        yearly: { name: 'Yearly', tagline: 'Best value for regular creators' },
+      } as Record<string, { name: string; tagline: string }>,
+      renewalNote: 'Subscriptions renew automatically at the price shown until you cancel. Unused monthly credits do not roll over.',
     },
     faq: {
       title: 'Questions, answered',
@@ -178,7 +231,15 @@ export function en(s: S) {
           guide: { article: 'howTo', label: `Photo tips for a better ${k} AI video` },
         },
         { q: 'How long does a render take?', a: 'Most videos finish in 2–8 minutes depending on length and queue. You can close the page; finished videos wait in My videos.' },
-        { q: 'How do credits work?', a: 'Each second of video costs one credit. Credits are bought in packs, never expire and are refunded automatically if a render fails.' },
+        {
+          q: 'How do credits work?',
+          a: subs
+            ? 'Each second of video costs one credit. Credits from packs never expire; subscription credits are added every month and expire at the end of that month. Renders use the credits that expire soonest first, and credits are refunded automatically if a render fails.'
+            : 'Each second of video costs one credit. Credits are bought in packs, never expire and are refunded automatically if a render fails.',
+        },
+        ...(subs
+          ? [{ q: 'How do I cancel my subscription?', a: 'Open My account → Billing and choose Cancel renewal. You won’t be charged again, and your plan and credits stay available until the end of the current period.' }]
+          : []),
         { q: 'Can I use someone else’s photo?', a: 'Only with their permission, and never photos of minors, celebrities or public figures. Accounts that break this rule are closed.' },
         { q: 'What happens to my photos?', a: `Uploads are private, used only to make your video and ${photoRetention}. Finished videos are ${videoRetention}. Deleting your account removes everything right away.` },
       ] as FaqItem[],
@@ -240,6 +301,8 @@ export function en(s: S) {
       ledger: 'Credit history',
       noOrders: 'No orders yet.',
       noLedger: 'No credit activity yet.',
+      expiring: (credits: number, date: string) => `${credits} ${credits === 1 ? 'credit expires' : 'credits expire'} on ${date}.`,
+      expiringHint: 'Renders use the credits that expire soonest first.',
       columns: { date: 'Date', pack: 'Pack', amount: 'Amount', status: 'Status', change: 'Change', reason: 'Reason' },
       orderStatus: { pending: 'Pending', paid: 'Paid', partially_refunded: 'Partially refunded', failed: 'Failed', refunded: 'Refunded', canceled: 'Canceled' } as Record<string, string>,
       refundedLine: (amount: string, credits: number) => `Refunded ${amount} · ${credits} credits`,
@@ -271,9 +334,30 @@ export function en(s: S) {
         generation_refund: 'Failed render refund',
         order_refund: 'Order refunded',
         admin_adjust: 'Adjustment by support',
+        expire: 'Credits expired',
+        redeem: 'Redeem code',
+        referral: 'Referral reward',
+        referral_refund: 'Referral reward reversed (order refunded)',
         signup_bonus: 'Welcome bonus',
         account_deleted: 'Account deleted',
+        subscription: 'Subscription credits',
       } as Record<string, string>,
+      subscription: {
+        title: 'Subscription',
+        status: { active: 'Active', past_due: 'Payment failed', canceled: 'Canceled', expired: 'Ended' } as Record<string, string>,
+        monthlyCredits: (n: number) => `${n} credits every month`,
+        renewsOn: (date: string, price: string) => `Renews on ${date} for ${price}.`,
+        endsOn: (date: string) => `Canceled. Your plan stays active until ${date} and you won’t be charged again.`,
+        ended: (date: string) => `Ended on ${date}.`,
+        nextGrant: (date: string) => `Next monthly credits on ${date}.`,
+        pastDue: 'Your renewal payment failed. Update your payment method to keep your plan; the payment will be retried automatically.',
+        cancel: 'Cancel renewal',
+        confirmCancel: 'Cancel renewal? You keep your plan and credits until the end of the current period.',
+        resume: 'Keep my plan',
+        resumeInPortal: 'Changed your mind? Open Manage payment to resume your plan.',
+        portal: 'Manage payment',
+        seePlans: 'See plans',
+      },
     },
     settings: {
       profile: 'Profile',
@@ -287,6 +371,18 @@ export function en(s: S) {
       dangerBody: 'Deletes your uploads and videos and signs you out everywhere. Remaining credits are forfeited. Order records are kept for accounting.',
       confirmLabel: 'Type DELETE to confirm',
       deleteButton: 'Delete my account',
+      redeemTitle: 'Redeem a code',
+      redeemBody: 'Have a promo or gift code? Enter it to add credits to your account. Each code can be used once per account.',
+      redeemButton: 'Redeem',
+      redeemSuccess: (credits: number, expires: string | null) =>
+        `Added ${credits} ${credits === 1 ? 'credit' : 'credits'}${expires ? `, valid until ${expires}` : ''}.`,
+      referralTitle: 'Invite friends',
+      referralBody: (credits: number) =>
+        `Share your link. When a friend signs up through it and makes their first purchase, you get ${credits} ${credits === 1 ? 'credit' : 'credits'}. If that order is refunded, the reward is taken back.`,
+      referralCopy: 'Copy link',
+      referralCopied: 'Copied',
+      referralStats: (invited: number, rewarded: number, credits: number) =>
+        `Signed up: ${invited} · Purchased: ${rewarded} · Credits earned: ${credits}`,
     },
     checkout: {
       successTitle: 'Payment received',
@@ -351,6 +447,7 @@ export function en(s: S) {
       lastUpdated: 'Last updated',
       aiGenerated: 'AI-generated',
       breadcrumb: 'Breadcrumb',
+      maintenance: 'We’re doing some maintenance. New videos and purchases are paused for a short while; your videos and credits are safe.',
     },
     // 文章列表页 /guides
     guides: {
@@ -364,7 +461,12 @@ export function en(s: S) {
     errors: {
       unauthorized: 'Please sign in first.',
       insufficient_credits: 'Not enough credits for this length.',
+      invalid_code: 'This code is invalid or has expired.',
+      code_used_up: 'This code has been fully redeemed.',
+      already_redeemed: 'You have already redeemed this code.',
       too_many_active_jobs: 'You already have 3 videos rendering. Please wait for one to finish.',
+      maintenance: 'We’re doing some maintenance. Please try again in a little while.',
+      daily_limit: 'We’ve hit today’s rendering capacity. Please try again tomorrow; your credits were not used.',
       rate_limited: 'Too many requests. Please wait a minute and try again.',
       file_too_large: 'That file is larger than 10 MB.',
       unsupported_file_type: 'Please upload a JPG, PNG or WebP image.',
@@ -387,13 +489,19 @@ export function en(s: S) {
       captcha_unavailable: 'The verification service is unavailable. Please try again.',
       captcha_not_configured: `Verification is not available. Please email ${s.supportEmail} instead.`,
       media_expired: 'This video has expired and was deleted.',
+      subscription_exists: 'You already have an active subscription. Manage it under My account → Billing.',
+      subscription_active: 'Cancel your subscription renewal under Billing before deleting your account.',
+      subscription_not_found: 'No active subscription was found.',
+      subscription_resume_in_portal: 'Open Manage payment to resume your plan.',
+      subscription_portal_unsupported: 'Payment management isn’t available for this subscription. Please contact support.',
+      subscription_cancel_unsupported: 'This subscription can’t be canceled here. Please contact support.',
       media_removed: 'This video was removed after a content report.',
       invalid_report: 'Please fill in every required field and confirm the statement.',
       not_found: 'We couldn’t find that. It may belong to a different account.',
       internal_error: 'Unexpected error. Please try again.',
     } as Record<string, string>,
     legal: {
-      updated: '2026-10-20',
+      updated: '2026-10-21',
       privacy: {
         title: 'Privacy Policy',
         sections: [
@@ -406,6 +514,9 @@ export function en(s: S) {
             p: [
               'The site uses a few cookies and similar browser storage that it needs to work, such as your sign-in session and your light or dark theme preference.',
               'We also set a first-party cookie (vt_attr, kept for 90 days) that records how you first and most recently reached us, such as a referring website or campaign link. We use it only to see which channels lead to sign-ups and purchases, and we do not share it with advertising networks.',
+              s.referralRewardCredits > 0
+                ? 'If you open a friend’s invite link, we set a cookie (vt_ref, kept for up to 30 days and removed once you sign up) so the invite can be credited. To prevent abuse of invite rewards, we store a salted hash of your IP address with the invite, not the address itself. Neither of you can see the other’s account details.'
+                : '',
               ga4Id || cfBeaconToken ? '' : 'We do not use third-party analytics or advertising cookies.',
               cfBeaconToken ? 'We count page views with Cloudflare Web Analytics, which does not use cookies or track you across websites.' : '',
               ga4Id
@@ -424,7 +535,15 @@ export function en(s: S) {
           { h: 'Your content and consent', p: ['Only upload photos of yourself or of adults who have given you permission. Do not upload photos of minors, celebrities or public figures, and do not use the service to harass, impersonate or deceive anyone. We may remove content and close accounts that break these rules.'] },
           { h: 'Generated videos', p: ['You may use the videos you create for personal and social media purposes. AI output can contain mistakes; review a video before sharing it. Videos are labelled as AI-generated: keep that label, say the video is AI-generated when you share it and never present it as real footage of an event.'] },
           { h: 'Reports and removal', p: [`Anyone can report content through our report page. We review reports and remove content that breaks these terms or someone’s rights within ${s.takedownSlaHours} hours. Removed photos are blocked from being uploaded again, and accounts involved in serious or repeated violations may be closed without a refund of used credits.`] },
-          { h: 'Credits and payments', p: ['Credits are sold in one-time packs, have no cash value and do not expire while the service is operating. Payments are processed by our merchant-of-record partner, whose terms also apply.'] },
+          {
+            h: 'Credits and payments',
+            p: [
+              'Credit packs are one-time purchases. Credits have no cash value, and credits from packs do not expire while the service is operating. Payments are processed by our merchant-of-record partner, whose terms also apply.',
+              subs
+                ? 'Subscriptions renew automatically at the end of each billing period (monthly or yearly) at the price you subscribed at, until you cancel. You can cancel at any time under Billing in your account; cancellation takes effect at the end of the current period and you keep your plan until then. Subscription credits are added once a month (yearly plans receive them month by month), expire at the end of that month and do not roll over.'
+                : '',
+            ].filter(Boolean),
+          },
           { h: 'Availability and liability', p: ['We work to keep the service available but provide it as is. To the extent permitted by law, our liability is limited to the amount you paid in the 12 months before a claim.'] },
           { h: 'Changes', p: ['We may update these terms. Continued use after an update means you accept the new terms.'] },
         ],
@@ -434,6 +553,17 @@ export function en(s: S) {
         sections: [
           { h: 'Failed renders', p: ['If a video fails to render, the credits are returned to your balance automatically. No action is needed.'] },
           { h: 'Unused credits', p: [`You can request a refund of a credit pack within 14 days of purchase if none of its credits have been used. Email ${s.supportEmail} with your order ID.`] },
+          ...(subs
+            ? [
+                {
+                  h: 'Subscriptions',
+                  p: [
+                    `You can request a refund of a subscription payment within 14 days of the charge if none of its credits have been used. Email ${s.supportEmail} with the order ID from Billing. Refunded credits are removed from your balance.`,
+                    'Canceling stops future renewals. The current period is not refunded automatically, and you keep your plan until it ends.',
+                  ],
+                },
+              ]
+            : []),
           { h: 'Quality issues', p: ['If a finished video is clearly broken (for example corrupted or missing the face), contact us with the video ID and we will restore the credits after review.'] },
           { h: 'How refunds are paid', p: ['Approved refunds go back to the original payment method through our payment partner and may take 5–10 business days to appear.'] },
         ],

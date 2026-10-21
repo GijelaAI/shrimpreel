@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { ArrowRight, Camera, Clock, Coins, Film, Flame, ShieldCheck, Smartphone, Sparkles } from 'lucide-react'
+import { ArrowRight, Camera, Check, Clock, Coins, Film, Flame, ShieldCheck, Smartphone, Sparkles, X } from 'lucide-react'
 import { Faq, faqJsonLd } from '#/components/Faq'
 import { Generator } from '#/components/Generator'
 import { Pricing } from '#/components/Pricing'
@@ -80,6 +80,62 @@ function Home() {
           </div>
         </div>
       </section>
+
+      {/* Problem：不用本站时的麻烦，文案设为 null 就不渲染 */}
+      {c.problem ? (
+        <section id="problem" className="scroll-mt-20 border-t border-line py-20">
+          <div className="container-page">
+            <p className="eyebrow text-accent-text">{c.problem.eyebrow}</p>
+            <h2 className="mt-3 max-w-2xl font-display text-4xl leading-tight sm:text-5xl">{c.problem.title}</h2>
+            <div className="mt-12 grid gap-5 md:grid-cols-3">
+              {c.problem.items.map((item) => (
+                <div key={item.title} className="card p-6">
+                  <h3 className="text-lg font-semibold">{item.title}</h3>
+                  <p className="mt-2 leading-7 text-muted">{item.body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {/* With / Without：自己做和用本站逐行对比，文案设为 null 就不渲染 */}
+      {c.withWithout ? (
+        <section id="compare" className="scroll-mt-20 border-t border-line bg-bg-soft/60 py-20">
+          <div className="container-page max-w-4xl">
+            <p className="eyebrow text-accent-text">{c.withWithout.eyebrow}</p>
+            <h2 className="mt-3 font-display text-4xl leading-tight sm:text-5xl">{c.withWithout.title}</h2>
+            <table className="mt-10 w-full table-fixed overflow-hidden rounded-2xl bg-card text-left ring-1 ring-line">
+              <thead>
+                <tr className="border-b border-line text-sm">
+                  <th scope="col" className="p-4 font-semibold text-muted">
+                    {c.withWithout.without}
+                  </th>
+                  <th scope="col" className="p-4 font-semibold">
+                    {c.withWithout.with}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {c.withWithout.rows.map((row) => (
+                  <tr key={row.with} className="border-b border-line last:border-0">
+                    <td className="p-4 align-top text-muted">
+                      <span className="flex items-start gap-2">
+                        <X className="mt-1 size-4 shrink-0 text-rose-500" aria-hidden /> {row.without}
+                      </span>
+                    </td>
+                    <td className="p-4 align-top">
+                      <span className="flex items-start gap-2">
+                        <Check className="mt-1 size-4 shrink-0 text-emerald-600" aria-hidden /> {row.with}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {/* How to：三步流程（关键词 H2；HowTo 富结果已下线，只用语义化有序列表） */}
       <section id="how-it-works" className="scroll-mt-20 border-t border-line py-20">

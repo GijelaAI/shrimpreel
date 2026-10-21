@@ -1,19 +1,39 @@
-// 按 src/config/site.ts 的积分包在 Dodo 建一次性商品，可选建/改 webhook 并取签名密钥。
+// 按 src/config/site.ts 的积分包在 Dodo 建一次性商品、按在售的订阅套餐（sellingPlans，订阅开关打开时的 site.plans）建订阅商品，可选建/改 webhook 并取签名密钥。
 // 凭据从 .dev.vars（或同名环境变量）读取：DODO_API_KEY；DODO_ENVIRONMENT=live 时打正式环境，否则 test。
 // API 密钥需要权限：产品 写入；用 --webhook 时还要 Webhooks 写入。
+// （这是脚本自己的权限。站点运行时的密钥权限见 README 的“第三方回调地址”，卖订阅还要 Subscriptions 读写和 Customers 写入。）
 //
 //   node scripts/dodo-setup.mjs                                         # 只打印计划
 //   node scripts/dodo-setup.mjs --apply                                 # 建商品，打印 DODO_PRODUCTS
 //   node scripts/dodo-setup.mjs --apply --write-dev-vars --webhook https://<host>/api/webhooks/dodo
 //   node scripts/dodo-setup.mjs --apply --write-dev-vars --webhook https://<new-host>/api/webhooks/dodo --webhook-id whk_xxx  # 隧道换域名后改 URL
 //
-// 已在 DODO_PRODUCTS 里有 id 的积分包会跳过，重复运行不会重复建商品。
+// 已在 DODO_PRODUCTS 里有 id 的积分包和订阅套餐会跳过，重复运行不会重复建商品。
 // webhook 签名密钥只写进 .dev.vars 的 DODO_WEBHOOK_SECRET（需 --write-dev-vars），不打印；生产用 `wrangler secret put DODO_WEBHOOK_SECRET`。
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { site } from '../src/config/site.ts'
+import { sellingPlans, site } from '../src/config/site.ts'
 
-// 与 normalizeDodoEvent 处理的事件一致；refund.failed 只记录不处理，便于排查
-const WEBHOOK_EVENTS = ['payment.succeeded', 'payment.failed', 'payment.cancelled', 'refund.succeeded', 'refund.failed']
+// 与 normalizeDodoEvent 处理的事件一致；refund.failed 只记录不处理，便于排查。开了订阅时加上订阅状态事件
+// https://docs.dodopayments.com/developer-resources/subscription-integration-guide
+const SUBSCRIPTION_EVENTS = [
+  'subscription.active',
+  'subscription.updated',
+  'subscription.on_hold',
+  'subscription.failed',
+  'subscription.renewed',
+  'subscription.past_due',
+  'subscription.plan_changed',
+  'subscription.cancelled',
+  'subscription.expired',
+]
+const WEBHOOK_EVENTS = [
+  'payment.succeeded',
+  'payment.failed',
+  'payment.cancelled',
+  'refund.succeeded',
+  'refund.failed',
+  ...(site.plans.length ? SUBSCRIPTION_EVENTS : []),
+]
 
 const args = parseArgs(process.argv.slice(2))
 const devVarsPath = new URL('../.dev.vars', import.meta.url)
@@ -33,10 +53,38 @@ const plan = site.packages.map((pkg) => ({
     metadata: { packageId: pkg.id, credits: String(pkg.credits), site: site.domain },
   },
 }))
+// 订阅商品：每期扣一次，不设试用；subscription_period 是订阅最长持续时间，设 10 年等于不自动到期
+// https://docs.dodopayments.com/api-reference/products/post-products
+for (const sub of sellingPlans) {
+  const unit = sub.interval === 'year' ? 'Year' : 'Month'
+  plan.push({
+    packageId: sub.id,
+    skip: Boolean(existing[sub.id]),
+    body: {
+      name: `${site.brandName} · ${sub.interval === 'year' ? 'Yearly' : 'Monthly'} (${sub.credits} credits / month)`.slice(0, 64),
+      description: `${sub.credits} credits every month for ${site.brandName}. Renews every ${sub.interval} until canceled; monthly credits expire at the end of each month.`,
+      tax_category: 'saas',
+      price: {
+        type: 'recurring_price',
+        currency: sub.currency,
+        price: sub.priceCents,
+        discount: 0,
+        purchasing_power_parity: false,
+        tax_inclusive: false,
+        payment_frequency_count: 1,
+        payment_frequency_interval: unit,
+        subscription_period_count: 10,
+        subscription_period_interval: 'Year',
+        trial_period_days: 0,
+      },
+      metadata: { packageId: sub.id, credits: String(sub.credits), interval: sub.interval, site: site.domain },
+    },
+  })
+}
 
 console.log(`environment=${environment} apply=${Boolean(args.apply)}`)
 for (const item of plan) {
-  const price = `${(item.body.price.price / 100).toFixed(2)} ${item.body.price.currency}`
+  const price = `${(item.body.price.price / 100).toFixed(2)} ${item.body.price.currency}${item.body.price.payment_frequency_interval ? ` / ${item.body.price.payment_frequency_interval}` : ''}`
   console.log(`  ${item.skip ? 'skip  ' : 'create'} ${item.packageId.padEnd(10)} ${item.body.name} (${price})${item.skip ? ` → ${existing[item.packageId]}` : ''}`)
 }
 if (args.webhook) console.log(`  webhook ${args['webhook-id'] ? `update ${args['webhook-id']} →` : 'add'} ${args.webhook} events=${WEBHOOK_EVENTS.join(',')}`)

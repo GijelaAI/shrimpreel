@@ -46,14 +46,26 @@ export const site = {
     ],
   },
 
-  // 视频模型（fal.ai queue API）。换模型时同时检查 src/server/video/fal.ts 的入参与出参。
+  // 视频模型，服务商由 VIDEO_PROVIDER 选择。换模型时同时检查 src/server/video/ 下对应文件的入参与出参。
   video: {
+    // fal.ai queue API（默认）
     falModel: 'fal-ai/wan/v2.2-14b/animate/replace',
     resolution: '480p',
     // 成本估算，只用于后台毛利；实际扣费以 fal 账单为准。换模型、分辨率或源视频帧率时同步更新。
     // fal 按帧计费：16 帧 = 1 个“视频秒”，480p $0.04/视频秒（https://fal.ai/models/fal-ai/wan/v2.2-14b/animate/replace）
     costCentsPerVideoSecond: 4,
     sourceFps: 24,
+    // yir.ai 网关（可选，VIDEO_PROVIDER=yir）：照片 + 源视频走 Kling Motion Control。prompt 按热词写清要保留什么。
+    yir: {
+      model: 'klingai/kling-2.6',
+      prompt: 'The person in the reference image performs the exact moves from the reference video. Keep their face, hair and outfit.',
+      resolution: '720p',
+      // 成本估算（美分/秒），只在出片时 yir 账单还没结算时用。按参考视频秒数计费，以 https://yir.ai/models 当前报价为准
+      costCentsPerSecond: 7,
+      // 用户照片会经过哪些上游渠道。null = 按 API Key 绑定的 Routing Profile 选，失败可换渠道；
+      // 填渠道 ID（如 ['official'] 只走 Kling 官方）则只在这些渠道里选，全部失败时任务失败。隐私政策要写明实际经过的渠道
+      routingOnly: null as readonly string[] | null,
+    },
   },
 
   durations: [
@@ -62,14 +74,36 @@ export const site = {
     { id: 'full', seconds: 18, credits: 18, source: 'neon-shuffle-v1-18s.mp4', isFull: true },
   ],
 
-  // 积分包：一次性购买，积分永不过期。价格用于展示与订单记录，实际收费以支付商后台为准。
+  // 积分包：一次性购买，买的积分永不过期（赠送积分可以设有效期，扣费时先扣快到期的）。价格用于展示与订单记录，实际收费以支付商后台为准。
+  // 可选 anchorPriceCents：划线原价，价格卡显示原价和“Save X%”。只能填这个套餐真实卖过的价格
+  // （欧盟要求以降价前 30 天内的最低价为准），不能编一个从没卖过的高价；没有就不填
   packages: [
     { id: 'starter', credits: 20, priceCents: 990, currency: 'USD' },
     { id: 'party', credits: 60, priceCents: 1990, currency: 'USD', highlight: true },
     { id: 'squad', credits: 100, priceCents: 2990, currency: 'USD' },
   ],
 
+  // 订阅：按月或按年自动续费，每月发 credits 积分，当期结束时作废（不累积）；年付一次收一年的钱，积分按月发放。
+  // 价格同样以支付商后台为准（dodo-setup / waffo-setup 按这里建订阅商品）。改价只影响新订阅，老订阅按订阅时的价格续费。
+  // 开关 subscriptionsEnabled：false 时不再卖新订阅（定价页、条款、退款政策和 FAQ 里的订阅内容一起隐藏，下单接口拒绝套餐），
+  // 已有订阅照常续费、退款，账单页仍能取消和进门户；这时要保留 *_PRODUCTS 里套餐的商品，支付商 webhook 也别退订订阅事件。
+  // 使用手册见 docs/subscriptions.md
+  subscriptionsEnabled: true as boolean,
+  plans: [
+    { id: 'monthly', interval: 'month', credits: 60, priceCents: 1490, currency: 'USD' },
+    { id: 'yearly', interval: 'year', credits: 60, priceCents: 14900, currency: 'USD', highlight: true },
+  ] as readonly SubscriptionPlan[],
+
   signupBonusCredits: 0,
+  // 注册赠送积分的有效期（天），0 = 永不过期
+  signupBonusValidDays: 0 as number,
+
+  // 邀请奖励：被邀请人第一笔付款入账后给邀请人发的积分，0 = 关闭（不显示邀请卡片，/i/ 链接不再绑定）
+  referralRewardCredits: 10 as number,
+  // 同一邀请人在同一 IP（IPv6 按 /64）下最多绑定几个新账号，超出的不发奖励
+  referralMaxPerIp: 3,
+  // 每个邀请人 30 天内最多获得几次奖励
+  referralMonthlyCap: 20,
 
   upload: {
     maxBytes: 10 * 1024 * 1024,
@@ -123,12 +157,35 @@ export const site = {
 export type DurationOption = (typeof site.durations)[number]
 export type CreditPackage = (typeof site.packages)[number]
 
+export interface SubscriptionPlan {
+  id: string
+  interval: 'month' | 'year'
+  credits: number // 每月发放的积分
+  priceCents: number // 每期价格（年付为一年的价格）
+  currency: string
+  highlight?: boolean
+}
+
 export function findDuration(id: string) {
   return site.durations.find((d) => d.id === id)
 }
 
 export function findPackage(id: string) {
   return site.packages.find((p) => p.id === id)
+}
+
+// 在售的订阅套餐：开关关掉时为空。处理已有订阅（续费、退款、账单页）用 findPlan，不受开关影响
+export const sellingPlans: readonly SubscriptionPlan[] = site.subscriptionsEnabled ? site.plans : []
+
+export function findPlan(id: string) {
+  return site.plans.find((p) => p.id === id)
+}
+
+// 套餐填了高于售价的 anchorPriceCents 才返回划线原价和折扣百分比，否则不显示
+export function anchorPrice(pack: CreditPackage): { cents: number; percentOff: number } | null {
+  const anchor = 'anchorPriceCents' in pack ? pack.anchorPriceCents : undefined
+  if (typeof anchor !== 'number' || anchor <= pack.priceCents) return null
+  return { cents: anchor, percentOff: Math.round((1 - pack.priceCents / anchor) * 100) }
 }
 
 export type ArticleKey = (typeof site.articles)[number]['key']

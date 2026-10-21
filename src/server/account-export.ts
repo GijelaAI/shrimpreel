@@ -4,11 +4,12 @@ import { nowIso } from './util'
 // 个人数据导出（GDPR 第 15、20 条：访问权与可携带权），个人中心“导出我的数据”下载为 JSON。
 // 只导出本人的数据和能直接看懂的字段：支付商内部 ID 只保留订单号；R2 路径、模型请求 ID、内部错误详情不导出；
 // 别人对本人视频的举报属于举报人的数据，不导出（生成记录的 removedAt 会体现下架）。
+// 邀请记录只导出本人这一侧：不带对方的用户 ID 和邮箱，也不带 IP 哈希。
 // 媒体文件本身不打包，保留期内可在个人中心逐个下载。
 const QUERIES = {
   account: `SELECT id, email, name, avatar_url AS avatarUrl, status, credits, locale, country, created_at AS createdAt,
       last_login_at AS lastLoginAt, signup_source AS signupSource, signup_medium AS signupMedium,
-      signup_campaign AS signupCampaign, signup_device AS signupDevice, attribution
+      signup_campaign AS signupCampaign, signup_device AS signupDevice, attribution, referral_code AS referralCode
     FROM users WHERE id = ?1`,
   sessions: `SELECT created_at AS createdAt, expires_at AS expiresAt, user_agent AS userAgent, ip
     FROM sessions WHERE user_id = ?1 ORDER BY created_at`,
@@ -17,8 +18,18 @@ const QUERIES = {
       refunded_amount_cents AS refundedAmountCents, refunded_credits AS refundedCredits, source, medium, campaign,
       country, device, attribution, created_at AS createdAt, paid_at AS paidAt, refunded_at AS refundedAt
     FROM orders WHERE user_id = ?1 ORDER BY created_at`,
+  subscriptions: `SELECT id, provider, plan_id AS planId, interval, credits_per_month AS creditsPerMonth, amount_cents AS amountCents,
+      currency, status, cancel_at_period_end AS cancelAtPeriodEnd, current_period_start AS currentPeriodStart,
+      current_period_end AS currentPeriodEnd, created_at AS createdAt, ended_at AS endedAt
+    FROM subscriptions WHERE user_id = ?1 ORDER BY created_at`,
   creditLedger: `SELECT delta, reason, ref_id AS refId, note, created_at AS createdAt
     FROM credit_ledger WHERE user_id = ?1 ORDER BY created_at, id`,
+  creditGrants: `SELECT source, amount, remaining, expires_at AS expiresAt, created_at AS createdAt
+    FROM credit_grants WHERE user_id = ?1 ORDER BY created_at, id`,
+  referredBy: `SELECT status, created_at AS createdAt FROM referrals WHERE invitee_id = ?1`,
+  referralsSent: `SELECT status, reject_reason AS rejectReason, reward_credits AS rewardCredits, created_at AS createdAt,
+      rewarded_at AS rewardedAt, reversed_at AS reversedAt
+    FROM referrals WHERE inviter_id = ?1 ORDER BY created_at`,
   uploads: `SELECT id, content_type AS contentType, size_bytes AS sizeBytes, sha256, created_at AS createdAt, expired_at AS expiredAt
     FROM uploads WHERE user_id = ?1 ORDER BY created_at`,
   generations: `SELECT id, template_id AS templateId, duration_id AS durationId, duration_seconds AS durationSeconds,

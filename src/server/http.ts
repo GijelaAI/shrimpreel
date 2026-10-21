@@ -87,5 +87,6 @@ export function publicOrder(o: OrderRow) {
     createdAt: o.created_at,
     paidAt: o.paid_at,
     refundedAt: o.refunded_at,
+    subscriptionId: o.subscription_id ?? null,
   }
 }

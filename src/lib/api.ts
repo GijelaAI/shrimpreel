@@ -56,6 +56,8 @@ export type ClientConfig = {
   devLogin: boolean
   paymentProvider: string
   turnstileSiteKey: string | null
+  // 后台运营参数里的维护模式和全站公告（按语言，空字符串表示不显示）
+  notice: { maintenance: boolean; announcement: Partial<Record<string, string>> }
 }
 
 export type Generation = {
@@ -90,6 +92,24 @@ export type Order = {
   createdAt: string
   paidAt: string | null
   refundedAt: string | null
+  subscriptionId: string | null
+}
+
+export type Subscription = {
+  id: string
+  provider: string
+  planId: string
+  interval: 'month' | 'year'
+  creditsPerMonth: number
+  amountCents: number
+  currency: string
+  status: 'active' | 'past_due' | 'canceled' | 'expired'
+  cancelAtPeriodEnd: boolean
+  currentPeriodStart: string | null
+  currentPeriodEnd: string | null
+  nextGrantAt: string | null
+  createdAt: string
+  endedAt: string | null
 }
 
 export type LedgerEntry = {
@@ -100,6 +120,8 @@ export type LedgerEntry = {
   note: string | null
   created_at: string
 }
+
+export type ExpiringCredits = { credits: number; expiresAt: string }
 
 export function isActiveGeneration(g: Generation) {
   return g.status === 'queued' || g.status === 'processing'

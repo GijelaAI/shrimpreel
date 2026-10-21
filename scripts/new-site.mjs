@@ -206,6 +206,6 @@ console.log(`
    交易邮件：Dashboard → Compute > Email Service → Onboard Domain 添加 ${domain}（DNS 须托管在 Cloudflare）；
    发给任意收件人需 Workers Paid。EMAIL_FROM 已改为 noreply@${domain}；ADMIN_EMAILS 同时接收举报、留言提醒和系统告警。
 5. 支付商品：node scripts/waffo-setup.mjs --store STO_xxx --apply（先 test 店铺跑通再建 prod），把输出写进 WAFFO_PRODUCTS；webhook 指向 https://${domain}/api/webhooks/waffo。
-6. 本地验证：npm run typecheck && npm test && npm run test:e2e && npm run seo:check
+6. 本地验证：npm run typecheck && npm test && npm run test:e2e && npm run seo:check；部署前 npm run doctor（npm run deploy 会先跑）
 7. 上线后：npm run seo:check -- --base https://${domain} --production；Search Console 与 Bing Webmaster 验证并提交 https://${domain}/sitemap.xml；
    如配置了 site.seo.indexNowKey：npm run seo:indexnow -- --submit`)

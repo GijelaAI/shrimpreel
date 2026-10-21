@@ -33,10 +33,11 @@ function resources(value: unknown, out: Record<string, string[]> = {}): Record<s
   return out
 }
 
-// 新站点由 new-site 删除 wrangler.staging.jsonc，此时跳过
-describe.skipIf(!existsSync('wrangler.staging.jsonc'))('wrangler.staging.jsonc', () => {
+// 新站点由 new-site 删除 wrangler.staging.jsonc，此时跳过。跳过的 describe 回调仍会执行，所以不存在时不能读文件
+const hasStaging = existsSync('wrangler.staging.jsonc')
+describe.skipIf(!hasStaging)('wrangler.staging.jsonc', () => {
   const main = readJsonc('wrangler.jsonc')
-  const staging = readJsonc('wrangler.staging.jsonc')
+  const staging = hasStaging ? readJsonc('wrangler.staging.jsonc') : main
 
   it('绑定、vars 键和运行参数与 wrangler.jsonc 一致', () => {
     const { name: _m, ...mainRest } = main

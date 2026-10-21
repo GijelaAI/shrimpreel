@@ -1,5 +1,6 @@
 export interface VideoSubmitInput {
   generationId: string
+  durationSeconds: number
   imageUrl: string
   sourceVideoUrl: string
   sourceVideoKey: string
@@ -14,11 +15,12 @@ export interface VideoSubmitResult {
 
 export type VideoStatus =
   | { state: 'pending' }
-  | { state: 'completed'; output: { url: string } | { r2Key: string } }
+  // costCents：服务商返回了已结算的实际费用时带上，否则用 costCents() 估算
+  | { state: 'completed'; output: { url: string } | { r2Key: string }; costCents?: number }
   | { state: 'failed'; code: string; message: string; retryable?: boolean }
 
 export interface VideoProvider {
-  id: 'fal' | 'mock'
+  id: 'fal' | 'yir' | 'mock'
   submit(input: VideoSubmitInput): Promise<VideoSubmitResult>
   status(requestId: string, meta: Record<string, unknown>): Promise<VideoStatus>
   // 出一条成片的估算成本（美分），出片后写入 generations.provider_cost_cents

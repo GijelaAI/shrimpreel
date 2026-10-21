@@ -26,6 +26,8 @@
     // 没有可 Onboard 的域名，staging 不发信（后台“邮件”页记为 skipped）
     "EMAIL_FROM": "",
     "WAFFO_ENVIRONMENT": "test",
+    // Waffo 店铺 ID（STO_xxx，公开）：订阅的客户门户要用；只卖积分包可以留空
+    "WAFFO_STORE_ID": "",
     "DODO_ENVIRONMENT": "test",
     // test 店铺的商品 id，与 .dev.vars 中的值相同
     "WAFFO_PRODUCTS": "{}",

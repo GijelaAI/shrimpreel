@@ -1,4 +1,6 @@
 import { Hono } from 'hono'
+import { findPlan, sellingPlans, site } from '#/config/site'
+import { REQUIRED_BINDINGS, checkConfig } from './config-health'
 import { ledgerStatements } from './credits'
 import { emailConfig, retryEmail } from './email'
 import { audit, pageParams, publicGeneration, readJson, requireAdmin } from './http'
@@ -6,8 +8,13 @@ import { failGeneration } from './jobs'
 import { serveR2Object } from './media'
 import { assertProviderRefundAllowed, localRefundKey, refundOrder } from './orders'
 import { notifyOrderPaid, notifyTakedownResolved } from './notifications'
-import { getRefundProvider } from './payments'
+import { registerProbeAdminRoutes } from './probes'
+import { getOrderProvider } from './payments'
+import { reconcileOrder } from './reconcile'
+import { registerRedeemAdminRoutes } from './redeem'
+import { registerReferralAdminRoutes } from './referrals'
 import { registerReportRoutes } from './reports'
+import { registerSettingsAdminRoutes } from './settings'
 import { removeReportedContent } from './takedown'
 import type { AppContext, GenerationRow, OrderRow, TakedownRow, UserRow } from './types'
 import { ApiError, createId, isCheckConstraintError, isUniqueConstraintError, nowIso } from './util'
@@ -20,6 +27,10 @@ adminRoutes.use('*', async (c, next) => {
 })
 
 registerReportRoutes(adminRoutes)
+registerRedeemAdminRoutes(adminRoutes)
+registerReferralAdminRoutes(adminRoutes)
+registerSettingsAdminRoutes(adminRoutes)
+registerProbeAdminRoutes(adminRoutes)
 
 // 净收入：按实收币种汇总实收（缺失时用标价）减已退金额；orders 只统计未全额退款的
 const NET_REVENUE = `COALESCE(paid_currency, currency) AS currency, SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END) AS orders,
@@ -36,6 +47,20 @@ const revenuePerCredit = (db: D1Database) =>
 const perCredit = (result: D1Result) => {
   const row = result.results[0] as { cents: number | null; credits: number | null } | undefined
   return row?.credits ? Number(row.cents) / row.credits : null
+}
+
+// 运行时配置检查：与部署前的 npm run doctor 同一套规则，按实际 env 检查（含 SESSION_SECRET 强度），只返回问题，不返回值
+function configIssues(env: Env) {
+  const record = env as unknown as Record<string, unknown>
+  const strings = Object.fromEntries(Object.entries(record).filter(([, v]) => typeof v === 'string')) as Record<string, string>
+  return checkConfig({
+    vars: strings,
+    secrets: strings,
+    bindings: REQUIRED_BINDINGS.filter((name) => record[name] != null),
+    packageIds: site.packages.map((p) => p.id),
+    planIds: sellingPlans.map((p) => p.id),
+    siteDomain: site.domain,
+  })
 }
 
 adminRoutes.get('/stats', async (c) => {
@@ -56,7 +81,11 @@ adminRoutes.get('/stats', async (c) => {
     db.prepare('SELECT status, COUNT(*) AS n FROM generations GROUP BY status'),
     db.prepare('SELECT COALESCE(SUM(credits), 0) AS n FROM users'),
     db.prepare(`SELECT COUNT(*) AS n FROM contact_messages WHERE status = 'open'`),
-    db.prepare(`SELECT COUNT(*) AS n FROM payment_events WHERE status = 'failed'`),
+    // 待处理：处理失败、找不到订单，以及金额/商品不符且订单还没补单或退款的付款事件
+    db.prepare(
+      `SELECT COUNT(*) AS n FROM payment_events e WHERE e.status IN ('failed', 'orphan')
+       OR (e.status = 'mismatch' AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = e.order_id AND o.status IN ('paid', 'refunded')))`,
+    ),
     db
       .prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN due_at < ? THEN 1 ELSE 0 END), 0) AS overdue FROM takedown_requests WHERE status = 'open'`)
       .bind(new Date().toISOString()),
@@ -87,6 +116,7 @@ adminRoutes.get('/stats', async (c) => {
     failedEmails: count(failedEmails!),
     generationCost30d: { videos: cost.videos, costCents: cost.cost_cents, creditsUsed: cost.credits },
     revenuePerCreditCents: perCredit(perCreditRow!),
+    config: configIssues(c.env),
   })
 })
 
@@ -135,9 +165,16 @@ adminRoutes.get('/users/:id', async (c) => {
   const id = c.req.param('id')
   const user = await db.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<UserRow>()
   if (!user) throw new ApiError(404, 'not_found')
-  const [orders, ledger, generations, spend, generationStats, auditRows] = await db.batch([
+  const [orders, ledger, grants, generations, spend, generationStats, auditRows, subscriptions] = await db.batch([
     db.prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').bind(id),
     db.prepare('SELECT * FROM credit_ledger WHERE user_id = ? ORDER BY created_at DESC LIMIT 100').bind(id),
+    // 还有剩余的批次，按扣费顺序（先到期先扣）
+    db
+      .prepare(
+        `SELECT id, source, ref_id, amount, remaining, expires_at, created_at FROM credit_grants
+         WHERE user_id = ? AND remaining > 0 ORDER BY expires_at IS NULL, expires_at, created_at, id LIMIT 50`,
+      )
+      .bind(id),
     db.prepare('SELECT * FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').bind(id),
     // 累计付款按实收币种汇总，不受上面 50 条的截断影响
     db
@@ -154,11 +191,14 @@ adminRoutes.get('/users/:id', async (c) => {
          LEFT JOIN users u ON u.id = a.admin_user_id WHERE a.target_type = 'user' AND a.target_id = ? ORDER BY a.created_at DESC LIMIT 50`,
       )
       .bind(id),
+    db.prepare('SELECT * FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 10').bind(id),
   ])
   return c.json({
     user,
     orders: orders!.results,
+    subscriptions: subscriptions!.results,
     ledger: ledger!.results,
+    grants: grants!.results,
     generations: (generations!.results as unknown as GenerationRow[]).map((g) => ({ ...publicGeneration(g), errorMessage: g.error_message })),
     spend: spend!.results,
     generationStats: generationStats!.results,
@@ -169,11 +209,15 @@ adminRoutes.get('/users/:id', async (c) => {
 adminRoutes.post('/users/:id/credits', async (c) => {
   const admin = requireAdmin(c)
   const id = c.req.param('id')
-  const body = await readJson<{ delta: number; note: string }>(c)
+  const body = await readJson<{ delta: number; note: string; expiresInDays?: number | null }>(c)
   const delta = Number(body.delta)
   if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 100000) throw new ApiError(400, 'invalid_delta')
   const note = (body.note ?? '').trim()
   if (!note) throw new ApiError(400, 'note_required')
+  // 补发可以设有效期（活动赠送、补偿），扣减不适用
+  const days = body.expiresInDays == null ? null : Number(body.expiresInDays)
+  if (days !== null && (delta < 0 || !Number.isInteger(days) || days < 1 || days > 3650)) throw new ApiError(400, 'invalid_expiry')
+  const expiresAt = days ? new Date(Date.now() + days * 86400_000).toISOString() : null
   const exists = await c.env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(id).first()
   if (!exists) throw new ApiError(404, 'not_found')
   try {
@@ -185,13 +229,14 @@ adminRoutes.post('/users/:id/credits', async (c) => {
         refId: admin.id,
         idempotencyKey: `admin:${createId('adj')}`,
         note,
+        expiresAt,
       }),
     )
   } catch (error) {
     if (isCheckConstraintError(error)) throw new ApiError(400, 'insufficient_credits', '扣减后余额会小于 0')
     throw error
   }
-  await audit(c.env, admin, 'credits.adjust', 'user', id, { delta, note })
+  await audit(c.env, admin, 'credits.adjust', 'user', id, { delta, note, expiresAt })
   return c.json({ ok: true })
 })
 
@@ -295,7 +340,7 @@ adminRoutes.post('/orders/:id/refund', async (c) => {
   if (!Number.isInteger(amountCents) || amountCents <= 0 || amountCents > remaining) throw new ApiError(400, 'invalid_amount')
   const fullAmount = amountCents === remaining
 
-  const provider = body.mode === 'local' ? null : getRefundProvider(c.env, order.provider)
+  const provider = body.mode === 'local' ? null : getOrderProvider(c.env, order.provider)
   if (provider?.refund) {
     if (!order.provider_payment_id) throw new ApiError(409, 'missing_provider_payment')
     assertProviderRefundAllowed(order)
@@ -322,6 +367,16 @@ adminRoutes.post('/orders/:id/refund', async (c) => {
   return c.json({ ok: true, requested: false, refunded })
 })
 
+// 查单：向支付商确认这笔订单是否已付款，已付就按 webhook 同样的规则入账。补单前先查，能省去去支付商后台核对
+adminRoutes.post('/orders/:id/reconcile', async (c) => {
+  const admin = requireAdmin(c)
+  const order = await c.env.DB.prepare('SELECT * FROM orders WHERE id = ?').bind(c.req.param('id')).first<OrderRow>()
+  if (!order) throw new ApiError(404, 'not_found')
+  const status = await reconcileOrder(c.env, order)
+  await audit(c.env, admin, 'order.reconcile', 'order', order.id, { status })
+  return c.json({ status })
+})
+
 // 补单：webhook 丢失但支付商后台确认已付款时，手动发放积分
 adminRoutes.post('/orders/:id/mark-paid', async (c) => {
   const admin = requireAdmin(c)
@@ -329,6 +384,8 @@ adminRoutes.post('/orders/:id/mark-paid', async (c) => {
   const order = await db.prepare('SELECT * FROM orders WHERE id = ?').bind(c.req.param('id')).first<OrderRow>()
   if (!order) throw new ApiError(404, 'not_found')
   if (order.status === 'paid' || order.status === 'refunded') throw new ApiError(409, 'order_already_paid')
+  // 订阅订单要建订阅、积分带到期时间，只能按支付商的记录入账：用“向支付商查单”
+  if (findPlan(order.package_id) || order.subscription_id) throw new ApiError(409, 'subscription_order_use_reconcile')
   const { note } = await readJson<{ note: string }>(c)
   if (!note?.trim()) throw new ApiError(400, 'note_required')
   const now = nowIso()

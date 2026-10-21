@@ -1,14 +1,17 @@
 import { findDuration } from '#/config/site'
 import { jobToken, signedUploadUrl, templateSourceUrl } from './media'
+import { expireStatements, generationRefundStatements } from './credits'
 import { notifyGenerationFinished } from './notifications'
+import { reconcilePendingOrders } from './reconcile'
 import type { GenerationRow, UploadRow, VideoJobMessage } from './types'
 import { sweepExpiredMedia } from './retention'
+import { grantDueSubscriptions } from './subscriptions'
 import { nowIso } from './util'
 import { getVideoProvider } from './video'
 import { VideoProviderError } from './video/types'
 
 const JOB_TIMEOUT_MINUTES = 45
-const POLL_DELAY_SECONDS: Record<string, number> = { mock: 2, fal: 20 }
+const POLL_DELAY_SECONDS: Record<string, number> = { mock: 2, fal: 20, yir: 20 }
 
 export async function enqueueJob(env: Env, message: VideoJobMessage, delaySeconds = 0) {
   await env.VIDEO_QUEUE.send(message, delaySeconds > 0 ? { delaySeconds } : undefined)
@@ -76,12 +79,14 @@ async function submitGeneration(env: Env, generation: GenerationRow) {
 
   // 签名在 try 里：生产环境 SESSION_SECRET 配错时会抛错，要和提交失败一样放回 queued，交给队列重试和死信退款
   try {
-    const webhookUrl = new URL('/api/webhooks/fal', env.SITE_URL)
+    const webhookUrl = new URL(`/api/webhooks/${provider.id}`, env.SITE_URL)
     webhookUrl.searchParams.set('gen', generation.id)
     webhookUrl.searchParams.set('token', await jobToken(env, generation.id))
+    // 重新提交时请求体要和第一次一致，签名按任务创建时间算（任务 45 分钟超时，2 小时有效期足够）
     const result = await provider.submit({
       generationId: generation.id,
-      imageUrl: await signedUploadUrl(env, upload.id),
+      durationSeconds: generation.duration_seconds,
+      imageUrl: await signedUploadUrl(env, upload.id, Date.parse(generation.created_at)),
       sourceVideoUrl: templateSourceUrl(env, duration.source),
       sourceVideoKey: `templates/${duration.source}`,
       webhookUrl: webhookUrl.toString(),
@@ -152,7 +157,7 @@ async function pollGeneration(env: Env, generation: GenerationRow) {
   }
   await env.MEDIA.put(outputKey, bytes, { httpMetadata: { contentType: 'video/mp4' } })
   const now = nowIso()
-  const costCents = provider.costCents(generation.duration_seconds)
+  const costCents = status.costCents ?? provider.costCents(generation.duration_seconds)
   const saved = await env.DB.prepare(
     `UPDATE generations SET status = 'succeeded', output_r2_key = ?, provider_cost_cents = ?, completed_at = ?, updated_at = ?
      WHERE id = ? AND status = 'processing'`,
@@ -173,10 +178,10 @@ async function pollGeneration(env: Env, generation: GenerationRow) {
     .run()
 }
 
-// 失败并退积分，三步在同一事务里：
+// 失败并退积分，在同一事务里：
 // 1) 只有 queued/processing 才会被置为 failed
 // 2) 只为 failed+refunded 的任务写退款流水；已退过则 idempotency_key 冲突，整个 batch 回滚（不会重复退）
-// 3) 只有第 2 步成立时才给用户加回积分（已成功的任务第 1、2 步都不生效）
+// 3) 只有第 2 步成立时才按扣费明细退回积分（已成功的任务第 1、2 步都不生效，见 credits.ts）
 // 返回这次调用是否真的把任务置为失败
 export async function failGeneration(env: Env, generationId: string, code: string, message: string) {
   const now = nowIso()
@@ -190,19 +195,7 @@ export async function failGeneration(env: Env, generationId: string, code: strin
            WHERE id = ? AND status IN ('queued', 'processing')`,
         )
         .bind(code.slice(0, 100), message.slice(0, 1000), now, now, generationId),
-      db
-        .prepare(
-          `INSERT INTO credit_ledger (id, user_id, delta, reason, ref_id, idempotency_key, note, created_at)
-           SELECT 'led_' || lower(hex(randomblob(12))), user_id, credits_cost, 'generation_refund', id, 'generation_refund:' || id, ?, ?
-           FROM generations WHERE id = ? AND status = 'failed' AND refunded = 1`,
-        )
-        .bind(code.slice(0, 100), now, generationId),
-      db
-        .prepare(
-          `UPDATE users SET credits = credits + (SELECT credits_cost FROM generations WHERE id = ?)
-           WHERE id = (SELECT user_id FROM generations WHERE id = ? AND status = 'failed' AND refunded = 1)`,
-        )
-        .bind(generationId, generationId),
+      ...generationRefundStatements(db, generationId, code.slice(0, 100), now),
     ])
   } catch (error) {
     if (error instanceof Error && /UNIQUE constraint failed/i.test(error.message)) return false
@@ -214,7 +207,7 @@ export async function failGeneration(env: Env, generationId: string, code: strin
   return failed
 }
 
-// 每 5 分钟：补投丢失的队列消息、超时任务失败退款、清理过期会话和长期未支付订单、按保留期删除媒体
+// 每 5 分钟：补投丢失的队列消息、超时任务失败退款、作废到期积分、年付订阅按月补发、pending 订单向支付商查单、清理过期会话和长期未支付订单、按保留期删除媒体
 export async function runScheduledMaintenance(env: Env) {
   const db = env.DB
   const staleBefore = new Date(Date.now() - 5 * 60_000).toISOString()
@@ -252,10 +245,19 @@ export async function runScheduledMaintenance(env: Env) {
     db
       .prepare(`UPDATE orders SET status = 'canceled', updated_at = ? WHERE status = 'pending' AND created_at < ?`)
       .bind(now, new Date(Date.now() - 24 * 3600_000).toISOString()),
+    ...expireStatements(db, now),
   ])
+
+  // 年付订阅按月补发积分
+  const grants = await grantDueSubscriptions(env)
+  if (grants.checked) console.log('subscription grants', grants)
 
   const swept = await sweepExpiredMedia(env)
   if (swept.uploads || swept.outputs) console.log('retention sweep', swept)
+
+  // 24 小时内的 pending 订单向支付商查单，补救丢失的 webhook（超过 24 小时的已在上面取消，两者不重叠）
+  const reconciled = await reconcilePendingOrders(env)
+  if (reconciled.checked) console.log('order reconcile sweep', reconciled)
 }
 
 function parseMeta(value: string | null): Record<string, unknown> {
