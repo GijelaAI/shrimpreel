@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { applyAttributionConsent } from '#/lib/attribution'
 import { CONSENT_OPEN_EVENT, readConsent, saveConsent, type Consent } from '#/lib/consent'
 import { useContent } from '#/lib/i18n'
 import { LocalLink } from './ui'
@@ -18,6 +19,7 @@ export function ConsentBanner({ ga4Id }: { ga4Id: string }) {
 
   const choose = (value: Consent) => {
     saveConsent(ga4Id, value)
+    applyAttributionConsent(value)
     setOpen(false)
   }
   return (

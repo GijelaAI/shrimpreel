@@ -19,6 +19,8 @@ export interface TakedownInput {
 
 // 下载文件名和链接里都带 generation id，举报人粘贴文件名或链接即可定位
 const GENERATION_ID = /gen_[A-Za-z0-9_-]{16}/
+// 公开分享链接 /v/<shareId>（可带语言前缀）：按 share_id 反查 generation
+const SHARE_LINK = /\/v\/([A-Za-z0-9_-]{16})(?![A-Za-z0-9_-])/
 
 function field(value: unknown, max: number) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
@@ -47,7 +49,9 @@ export async function createTakedown(
   const id = createId('tdr')
   const now = new Date()
   const dueAt = new Date(now.getTime() + site.takedownSlaHours * 3600_000).toISOString()
-  const generationId = (input.contentRef.match(GENERATION_ID) ?? input.details?.match(GENERATION_ID))?.[0] ?? null
+  const generationId =
+    (input.contentRef.match(GENERATION_ID) ?? input.details?.match(GENERATION_ID))?.[0] ??
+    (await generationIdFromShareLink(env, `${input.contentRef}\n${input.details ?? ''}`))
   await env.DB.prepare(
     `INSERT INTO takedown_requests (id, reporter_name, reporter_email, reporter_user_id, content_ref, generation_id, reason,
      details, is_depicted, status, due_at, locale, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`,
@@ -67,8 +71,12 @@ export async function createTakedown(
       now.toISOString(),
     )
     .run()
+  // 举报表单不需要登录，填的邮箱没人验证过：回执只发给已登录、且填的就是自己账号邮箱的举报人，
+  // 否则这张表单能被用来给任意地址发信。编号在提交后的页面上显示，处理结果仍发到填写的邮箱（要等管理员处理）
+  const receipt = reporter !== null && reporter.email.toLowerCase() === input.email.toLowerCase()
   await notifyTakedownCreated(env, {
     id,
+    receipt,
     reporter_email: input.email,
     reporter_user_id: reporter?.id ?? null,
     locale,
@@ -77,6 +85,13 @@ export async function createTakedown(
     due_at: dueAt,
   })
   return { id, dueAt }
+}
+
+async function generationIdFromShareLink(env: Env, text: string) {
+  const shareId = text.match(SHARE_LINK)?.[1]
+  if (!shareId) return null
+  const row = await env.DB.prepare('SELECT id FROM generations WHERE share_id = ?').bind(shareId).first<{ id: string }>()
+  return row?.id ?? null
 }
 
 // 下架：同一张原图（按 sha256，包括其他账号上传的同一文件）生成的所有成片和原图都删除，
@@ -96,25 +111,28 @@ export async function removeReportedContent(env: Env, generation: GenerationRow,
     db.prepare(`SELECT id, r2_key FROM uploads WHERE expired_at IS NULL AND ${uploadMatch}`).bind(...uploadParams),
     db
       .prepare(
-        `SELECT id, user_id, status, output_r2_key FROM generations WHERE removed_at IS NULL
+        `SELECT id, user_id, status, output_r2_key, share_poster_key FROM generations WHERE removed_at IS NULL
          AND (id = ? OR upload_id IN (SELECT id FROM uploads WHERE ${uploadMatch}))`,
       )
       .bind(generation.id, ...uploadParams),
   ])
   const uploadRows = uploads!.results as Array<{ id: string; r2_key: string }>
-  const generationRows = generations!.results as Array<Pick<GenerationRow, 'id' | 'user_id' | 'status' | 'output_r2_key'>>
+  const generationRows = generations!.results as Array<Pick<GenerationRow, 'id' | 'user_id' | 'status' | 'output_r2_key' | 'share_poster_key'>>
 
   for (const row of generationRows) {
     if (row.status === 'queued' || row.status === 'processing') await failGeneration(env, row.id, 'content_removed', 'Removed after a takedown request')
   }
-  const keys = [...uploadRows.map((r) => r.r2_key), ...generationRows.flatMap((r) => (r.output_r2_key ? [r.output_r2_key] : []))]
+  const keys = [
+    ...uploadRows.map((r) => r.r2_key),
+    ...generationRows.flatMap((r) => [r.output_r2_key, r.share_poster_key].filter((key): key is string => Boolean(key))),
+  ]
   for (let i = 0; i < keys.length; i += 1000) await env.MEDIA.delete(keys.slice(i, i + 1000))
 
   const now = nowIso()
   await db.batch([
     db
       .prepare(
-        `UPDATE generations SET output_r2_key = NULL, removed_at = ?, updated_at = ? WHERE removed_at IS NULL
+        `UPDATE generations SET output_r2_key = NULL, share_poster_key = NULL, removed_at = ?, updated_at = ? WHERE removed_at IS NULL
          AND (id = ? OR upload_id IN (SELECT id FROM uploads WHERE ${uploadMatch}))`,
       )
       .bind(now, now, generation.id, ...uploadParams),

@@ -1,5 +1,9 @@
 // 客户端来源采集：首次/最近一次触达写入 vt_attr cookie（90 天，服务端在注册/下单时读取），
 // 每个浏览器会话上报一次访问到 /api/t/visit，构成后台漏斗的第一步。字段与 src/server/attribution.ts 对齐。
+// 配置了 GA4（有同意横幅）时，vt_attr 和统计 Cookie 一样要等访客接受后才写：之前的触达只记在内存里，
+// 拒绝或撤回时删除。没同意的访客注册、下单时没有归因 Cookie，记为 direct；访问上报不写 Cookie，照常发送。
+
+import { readConsent, type Consent } from './consent'
 
 const COOKIE = 'vt_attr'
 const MAX_AGE = 90 * 86400
@@ -26,6 +30,8 @@ function readCookie() {
   return match ? decode(match[1]!) : null
 }
 
+const hasCookie = () => /(?:^|;\s*)vt_attr=/.test(document.cookie)
+
 function currentTouch(): Touch {
   const url = new URL(location.href)
   const touch: Touch = { landing: url.pathname.slice(0, 200), at: new Date().toISOString() }
@@ -46,19 +52,37 @@ function currentTouch(): Touch {
 
 const hasSignal = (touch: Touch) => PARAMS.some((key) => touch[key]) || !!touch.referrer
 
-// 在客户端启动时调用一次
-export function captureAttribution() {
+// 等待同意的触达（只在本次页面生命周期内保留）
+let pending: { first?: Touch; last?: Touch } | null = null
+
+function writeCookie(value: { first?: Touch; last?: Touch }) {
+  const secure = location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${COOKIE}=${encode(value)}; Max-Age=${MAX_AGE}; Path=/; SameSite=Lax${secure}`
+}
+
+function deleteCookie() {
+  document.cookie = `${COOKIE}=; Max-Age=0; Path=/`
+}
+
+// 在客户端启动时调用一次；requireConsent 为 true（配置了 GA4）时，未接受统计 Cookie 就不写 vt_attr
+export function captureAttribution(requireConsent: boolean) {
   if (typeof window === 'undefined') return
   try {
     const touch = currentTouch()
-    const stored = readCookie() ?? {}
+    const allowed = !requireConsent || readConsent() === 'granted'
+    const stored = (allowed && readCookie()) || {}
     const next = {
       first: stored.first ?? touch,
       // direct 回访不覆盖最近一次有来源的触达（last non-direct）
       last: hasSignal(touch) || !stored.last ? touch : stored.last,
     }
-    const secure = location.protocol === 'https:' ? '; Secure' : ''
-    document.cookie = `${COOKIE}=${encode(next)}; Max-Age=${MAX_AGE}; Path=/; SameSite=Lax${secure}`
+    if (allowed) {
+      writeCookie(next)
+    } else {
+      pending = next
+      // 改为需要同意之前写下的 Cookie 一并删除
+      if (hasCookie()) deleteCookie()
+    }
     if (!sessionStorage.getItem('vt_visit')) {
       sessionStorage.setItem('vt_visit', '1')
       void fetch('/api/t/visit', {
@@ -71,6 +95,20 @@ export function captureAttribution() {
     }
   } catch {
     // 隐私模式等禁用存储时不影响页面
+  }
+}
+
+// 同意横幅做出选择后调用：接受时补写本次页面记下的触达，拒绝或撤回时删除
+export function applyAttributionConsent(value: Consent) {
+  try {
+    if (value === 'granted') {
+      if (pending && !hasCookie()) writeCookie(pending)
+    } else {
+      deleteCookie()
+    }
+    pending = null
+  } catch {
+    // 禁用 Cookie 时忽略
   }
 }
 

@@ -80,12 +80,23 @@ export interface SignInProfile {
   referral?: SignupReferral | null // 仅新用户注册时绑定邀请人
 }
 
-// Google 登录与 dev 登录共用：按 google_sub / email 找人，没有就创建并发放注册赠送积分（后台运营参数，默认取 site.ts）。
+// 注销账号只留邮箱的加盐哈希（deleted_accounts），用来识别“注销后用同一邮箱重新注册”。
+// 盐是 SESSION_SECRET：换密钥后旧记录对不上，这些邮箱会再领一次注册赠送
+export async function deletedEmailHash(env: Env, email: string) {
+  return sha256Hex(`deleted-email:${env.SESSION_SECRET ?? ''}:${email.trim().toLowerCase()}`)
+}
+
+// Google 登录与 dev 登录共用：先按 google_sub、再按 email 找人，没有就创建并发放注册赠送积分（后台运营参数，默认取 site.ts）。
+// 账号以 Google 的 sub 为准：邮箱相同但已绑定另一个 sub 时拒绝登录（Google 账号被删后同一邮箱可以注册成新账号），
+// 只有 google_sub 为空的账号（dev 登录创建的）才按邮箱绑定
 export async function upsertUser(env: Env, profile: SignInProfile): Promise<UserRow> {
   const email = profile.email.trim().toLowerCase()
   const db = env.DB
   const existing = await db
-    .prepare('SELECT * FROM users WHERE (google_sub IS NOT NULL AND google_sub = ?) OR email = ? LIMIT 1')
+    .prepare(
+      `SELECT * FROM users WHERE (google_sub IS NOT NULL AND google_sub = ?1) OR email = ?2
+       ORDER BY CASE WHEN google_sub = ?1 THEN 0 ELSE 1 END LIMIT 1`,
+    )
     .bind(profile.googleSub, email)
     .first<UserRow>()
   const now = nowIso()
@@ -93,6 +104,10 @@ export async function upsertUser(env: Env, profile: SignInProfile): Promise<User
 
   if (existing) {
     if (existing.status !== 'active') throw new ApiError(403, 'account_disabled')
+    if (profile.googleSub && existing.google_sub && existing.google_sub !== profile.googleSub) {
+      console.warn('sign-in rejected: email bound to another google account', existing.id)
+      throw new ApiError(409, 'account_conflict')
+    }
     await db
       .prepare(
         `UPDATE users SET name = COALESCE(?, name), avatar_url = COALESCE(?, avatar_url),
@@ -129,9 +144,14 @@ export async function upsertUser(env: Env, profile: SignInProfile): Promise<User
         now,
       ),
   ]
-  if (profile.referral) statements.push(bindReferralStatement(db, id, profile.referral, now))
+  // 注销过的邮箱重新注册：不发注册赠送、不绑定邀请人
+  const returning = await db
+    .prepare('SELECT 1 AS hit FROM deleted_accounts WHERE email_hash = ?')
+    .bind(await deletedEmailHash(env, email))
+    .first<{ hit: number }>()
+  if (profile.referral && !returning) statements.push(bindReferralStatement(db, id, profile.referral, now))
   const { signupBonusCredits, signupBonusValidDays } = await getSettings(env)
-  if (signupBonusCredits > 0) {
+  if (signupBonusCredits > 0 && !returning) {
     statements.push(
       ...ledgerStatements(db, {
         userId: id,

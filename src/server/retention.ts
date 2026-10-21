@@ -38,16 +38,17 @@ export async function sweepExpiredMedia(env: Env, options: SweepOptions = {}) {
   if (site.retention.outputDays > 0) {
     const cutoff = new Date(now - site.retention.outputDays * DAY_MS).toISOString()
     const rows = await env.DB.prepare(
-      `SELECT id, output_r2_key FROM generations WHERE status = 'succeeded' AND output_r2_key IS NOT NULL AND completed_at < ? ${userFilter}
+      `SELECT id, output_r2_key, share_poster_key FROM generations WHERE status = 'succeeded' AND output_r2_key IS NOT NULL AND completed_at < ? ${userFilter}
        LIMIT ${BATCH}`,
     )
       .bind(cutoff, ...userParams)
-      .all<{ id: string; output_r2_key: string }>()
+      .all<{ id: string; output_r2_key: string; share_poster_key: string | null }>()
     if (rows.results.length) {
-      await env.MEDIA.delete(rows.results.map((r) => r.output_r2_key))
+      // 分享封面随成片一起删；share_id 保留，分享链接显示“已过期”（410）而不是 404
+      await env.MEDIA.delete(rows.results.flatMap((r) => (r.share_poster_key ? [r.output_r2_key, r.share_poster_key] : [r.output_r2_key])))
       const ids = rows.results.map((r) => r.id)
       await env.DB.prepare(
-        `UPDATE generations SET output_r2_key = NULL, expired_at = ?, updated_at = ? WHERE id IN (${ids.map(() => '?').join(',')})`,
+        `UPDATE generations SET output_r2_key = NULL, share_poster_key = NULL, expired_at = ?, updated_at = ? WHERE id IN (${ids.map(() => '?').join(',')})`,
       )
         .bind(stamp, stamp, ...ids)
         .run()

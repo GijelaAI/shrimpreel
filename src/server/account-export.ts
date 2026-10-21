@@ -34,7 +34,8 @@ const QUERIES = {
     FROM uploads WHERE user_id = ?1 ORDER BY created_at`,
   generations: `SELECT id, template_id AS templateId, duration_id AS durationId, duration_seconds AS durationSeconds,
       credits_cost AS creditsCost, upload_id AS uploadId, status, error_code AS errorCode, refunded,
-      created_at AS createdAt, completed_at AS completedAt, expired_at AS expiredAt, removed_at AS removedAt
+      created_at AS createdAt, completed_at AS completedAt, expired_at AS expiredAt, removed_at AS removedAt,
+      share_id AS shareId, shared_at AS sharedAt
     FROM generations WHERE user_id = ?1 ORDER BY created_at`,
   contactMessages: `SELECT id, email, topic, message, status, created_at AS createdAt
     FROM contact_messages WHERE user_id = ?1 ORDER BY created_at`,

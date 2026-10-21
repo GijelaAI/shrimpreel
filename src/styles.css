@@ -1,4 +1,5 @@
-@import 'tailwindcss';
+/* 只扫描 src/：默认会扫整个仓库，README、docs 里像类名的词会被编进 CSS，dev 下改文档还会让页面整页刷新 */
+@import 'tailwindcss' source('.');
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 

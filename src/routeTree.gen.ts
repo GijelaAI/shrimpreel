@@ -42,6 +42,7 @@ import { Route as Char123LocaleChar125CheckoutSuccessRouteImport } from './route
 import { Route as Char123LocaleChar125DashboardIndexRouteImport } from './routes/{-$locale}/dashboard/index'
 import { Route as Char123LocaleChar125DashboardBillingRouteImport } from './routes/{-$locale}/dashboard/billing'
 import { Route as Char123LocaleChar125DashboardSettingsRouteImport } from './routes/{-$locale}/dashboard/settings'
+import { Route as Char123LocaleChar125VShareIdRouteImport } from './routes/{-$locale}/v.$shareId'
 import { Route as Char123LocaleChar125DashboardOrdersIdRouteImport } from './routes/{-$locale}/dashboard/orders.$id'
 
 const AdminRouteRoute = AdminRouteRouteImport.update({
@@ -226,6 +227,12 @@ const Char123LocaleChar125DashboardSettingsRoute =
     path: '/settings',
     getParentRoute: () => Char123LocaleChar125DashboardRouteRoute,
   } as any)
+const Char123LocaleChar125VShareIdRoute =
+  Char123LocaleChar125VShareIdRouteImport.update({
+    id: '/v/$shareId',
+    path: '/v/$shareId',
+    getParentRoute: () => Char123LocaleChar125RouteRoute,
+  } as any)
 const Char123LocaleChar125DashboardOrdersIdRoute =
   Char123LocaleChar125DashboardOrdersIdRouteImport.update({
     id: '/orders/$id',
@@ -264,6 +271,7 @@ export interface FileRoutesByFullPath {
   '/{-$locale}/checkout/success': typeof Char123LocaleChar125CheckoutSuccessRoute
   '/{-$locale}/dashboard/billing': typeof Char123LocaleChar125DashboardBillingRoute
   '/{-$locale}/dashboard/settings': typeof Char123LocaleChar125DashboardSettingsRoute
+  '/{-$locale}/v/$shareId': typeof Char123LocaleChar125VShareIdRoute
   '/admin/orders/': typeof AdminOrdersIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/{-$locale}/dashboard/': typeof Char123LocaleChar125DashboardIndexRoute
@@ -297,6 +305,7 @@ export interface FileRoutesByTo {
   '/{-$locale}/checkout/success': typeof Char123LocaleChar125CheckoutSuccessRoute
   '/{-$locale}/dashboard/billing': typeof Char123LocaleChar125DashboardBillingRoute
   '/{-$locale}/dashboard/settings': typeof Char123LocaleChar125DashboardSettingsRoute
+  '/{-$locale}/v/$shareId': typeof Char123LocaleChar125VShareIdRoute
   '/admin/orders': typeof AdminOrdersIndexRoute
   '/admin/users': typeof AdminUsersIndexRoute
   '/{-$locale}/dashboard': typeof Char123LocaleChar125DashboardIndexRoute
@@ -334,6 +343,7 @@ export interface FileRoutesById {
   '/{-$locale}/checkout/success': typeof Char123LocaleChar125CheckoutSuccessRoute
   '/{-$locale}/dashboard/billing': typeof Char123LocaleChar125DashboardBillingRoute
   '/{-$locale}/dashboard/settings': typeof Char123LocaleChar125DashboardSettingsRoute
+  '/{-$locale}/v/$shareId': typeof Char123LocaleChar125VShareIdRoute
   '/admin/orders/': typeof AdminOrdersIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/{-$locale}/dashboard/': typeof Char123LocaleChar125DashboardIndexRoute
@@ -372,6 +382,7 @@ export interface FileRouteTypes {
     | '/{-$locale}/checkout/success'
     | '/{-$locale}/dashboard/billing'
     | '/{-$locale}/dashboard/settings'
+    | '/{-$locale}/v/$shareId'
     | '/admin/orders/'
     | '/admin/users/'
     | '/{-$locale}/dashboard/'
@@ -405,6 +416,7 @@ export interface FileRouteTypes {
     | '/{-$locale}/checkout/success'
     | '/{-$locale}/dashboard/billing'
     | '/{-$locale}/dashboard/settings'
+    | '/{-$locale}/v/$shareId'
     | '/admin/orders'
     | '/admin/users'
     | '/{-$locale}/dashboard'
@@ -441,6 +453,7 @@ export interface FileRouteTypes {
     | '/{-$locale}/checkout/success'
     | '/{-$locale}/dashboard/billing'
     | '/{-$locale}/dashboard/settings'
+    | '/{-$locale}/v/$shareId'
     | '/admin/orders/'
     | '/admin/users/'
     | '/{-$locale}/dashboard/'
@@ -685,6 +698,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Char123LocaleChar125DashboardSettingsRouteImport
       parentRoute: typeof Char123LocaleChar125DashboardRouteRoute
     }
+    '/{-$locale}/v/$shareId': {
+      id: '/{-$locale}/v/$shareId'
+      path: '/v/$shareId'
+      fullPath: '/{-$locale}/v/$shareId'
+      preLoaderRoute: typeof Char123LocaleChar125VShareIdRouteImport
+      parentRoute: typeof Char123LocaleChar125RouteRoute
+    }
     '/{-$locale}/dashboard/orders/$id': {
       id: '/{-$locale}/dashboard/orders/$id'
       path: '/orders/$id'
@@ -773,6 +793,7 @@ interface Char123LocaleChar125RouteRouteChildren {
   Char123LocaleChar125IndexRoute: typeof Char123LocaleChar125IndexRoute
   Char123LocaleChar125CheckoutMockRoute: typeof Char123LocaleChar125CheckoutMockRoute
   Char123LocaleChar125CheckoutSuccessRoute: typeof Char123LocaleChar125CheckoutSuccessRoute
+  Char123LocaleChar125VShareIdRoute: typeof Char123LocaleChar125VShareIdRoute
 }
 
 const Char123LocaleChar125RouteRouteChildren: Char123LocaleChar125RouteRouteChildren =
@@ -796,6 +817,7 @@ const Char123LocaleChar125RouteRouteChildren: Char123LocaleChar125RouteRouteChil
       Char123LocaleChar125CheckoutMockRoute,
     Char123LocaleChar125CheckoutSuccessRoute:
       Char123LocaleChar125CheckoutSuccessRoute,
+    Char123LocaleChar125VShareIdRoute: Char123LocaleChar125VShareIdRoute,
   }
 
 const Char123LocaleChar125RouteRouteWithChildren =

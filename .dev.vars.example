@@ -15,3 +15,5 @@ YIR_API_KEY=
 OPENAI_API_KEY=
 # Turnstile（vars.TURNSTILE_SITE_KEY 非空时必填）
 TURNSTILE_SECRET_KEY=
+# 付款即时通知（可选）：Telegram / 飞书 / Discord / Slack 的 webhook 地址，见 docs/env.md
+PAYMENT_NOTIFY_WEBHOOK_URL=

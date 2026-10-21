@@ -92,7 +92,7 @@ test('生成邮件：成功、失败退积分各一封，跟随用户最近使�
   expect(byTemplate.generation_failed.subject).toContain('积分已退回')
 })
 
-test('举报邮件：回执 + 管理员提醒；临近截止、超时各提醒一次；下架后通知举报人和作者，不再提醒', async ({ page, browser }, testInfo) => {
+test('举报邮件：未登录举报不发回执，只提醒管理员；临近截止、超时各提醒一次；下架后通知举报人和作者，不再提醒；登录用户填本人邮箱才收回执', async ({ page, browser }, testInfo) => {
   const shot = async (name: string) => testInfo.attach(name, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
 
   // 被举报的作者（独一份的图片，避免下架时拉黑共用 fixture）
@@ -122,12 +122,10 @@ test('举报邮件：回执 + 管理员提醒；临近截止、超时各提醒�
       }),
       201,
     )
-    // 同一批写入的 created_at 相同，排序后比较
+    // 同一批写入的 created_at 相同，排序后比较。填写的邮箱没人验证过，未登录举报不发回执（防止借表单给任意地址发信）
     const keys = async () => (await outbox(anon.request, { ref: report.id })).map((e) => e.dedupe_key).sort()
-    expect(await keys()).toEqual([`admin_takedown:${report.id}:new:${ADMIN_EMAIL}`, `takedown_received:${report.id}`])
-    const [receipt] = await outbox(anon.request, { to: reporterEmail })
-    expect(receipt).toMatchObject({ template: 'takedown_received', locale: 'zh', status: 'sent', user_id: null })
-    expect(receipt.subject).toContain(report.id)
+    expect(await keys()).toEqual([`admin_takedown:${report.id}:new:${ADMIN_EMAIL}`])
+    expect(await outbox(anon.request, { to: reporterEmail })).toEqual([])
 
     // SLA 48 小时、截止前 12 小时提醒：现在不提醒；+37h 临近截止；+49h 已超时；同一阶段重复跑 Cron 不重发
     expect(await reminders(anon.request, report.id, 0)).toBe(0)
@@ -150,7 +148,6 @@ test('举报邮件：回执 + 管理员提醒；临近截止、超时各提醒�
       `admin_takedown:${report.id}:new:${ADMIN_EMAIL}`,
       `admin_takedown:${report.id}:overdue:${ADMIN_EMAIL}`,
       `content_removed:${report.id}:${owner.id}`,
-      `takedown_received:${report.id}`,
       `takedown_resolved:${report.id}`,
     ])
     const [removed] = await outbox(anon.request, { to: ownerEmail, ref: report.id })
@@ -169,13 +166,37 @@ test('举报邮件：回执 + 管理员提醒；临近截止、超时各提醒�
     await expect(rows.first()).toBeVisible()
     await admin.getByPlaceholder('收件人 / 订单号 / 举报编号').fill(report.id)
     await admin.getByRole('button', { name: '搜索' }).click()
-    await expect(rows).toHaveCount(6)
+    await expect(rows).toHaveCount(5)
     await expect(admin.locator(`[data-testid="admin-email-row"][data-key="content_removed:${report.id}:${owner.id}"]`)).toContainText('已发送')
     await expect(rows.getByRole('button', { name: '重发' })).toHaveCount(0)
     await expect(admin.getByTestId('email-not-configured')).toHaveCount(0)
     const { emails } = await json<{ emails: Array<{ id: string }> }>(admin.request.get(`/api/admin/emails?q=${report.id}`))
     expect((await json<{ error: string }>(post(admin.request, `/api/admin/emails/${emails[0].id}/retry`, {}), 409)).error).toBe('email_not_retryable')
     await testInfo.attach('admin-emails', { body: await admin.screenshot({ fullPage: true }), contentType: 'image/png' })
+
+    // 登录用户：填本人账号邮箱（大小写不同也算）才收回执；填别人的邮箱不发
+    const leftover: string[] = []
+    const loggedIn = async (email: string) => {
+      const { report: own } = await json<{ report: { id: string } }>(
+        post(page.request, '/api/takedowns', {
+          name: 'Signed-in Reporter',
+          email,
+          contentRef: 'https://example.com/some-video',
+          reason: 'other',
+          attest: true,
+          locale: 'en',
+        }),
+        201,
+      )
+      leftover.push(own.id)
+      return (await outbox(anon.request, { ref: own.id })).map((e) => e.template).sort()
+    }
+    expect(await loggedIn(ownerEmail.toUpperCase())).toEqual(['admin_takedown', 'takedown_received'])
+    expect(await loggedIn(uniqueEmail('someone-else'))).toEqual(['admin_takedown'])
+    const [receipt] = (await outbox(anon.request, { to: ownerEmail })).filter((e) => e.template === 'takedown_received')
+    expect(receipt).toMatchObject({ locale: 'en', status: 'sent', user_id: owner.id })
+    // 驳回这两条举报：后台队列每页 50 条，未处理的越积越多会把其它用例的举报挤到第二页
+    for (const id of leftover) await json(post(admin.request, `/api/admin/takedowns/${id}/resolve`, { action: 'reject', note: 'e2e: cleanup' }))
   } finally {
     await anon.close()
     await adminContext.close()

@@ -1,15 +1,19 @@
 import handler from '@tanstack/react-start/server-entry'
 import { runHealthCheck } from './server/alerts'
 import { app } from './server/app'
+import { runDailyBackup } from './server/backup'
 import { PERMISSIONS_POLICY, contentSecurityPolicy, createNonce } from './server/csp'
 import { handleDeadLetterBatch, handleQueueBatch, runScheduledMaintenance } from './server/jobs'
 import { runNotificationCron } from './server/notifications'
 import { isSeoPath } from './server/seo'
+import { SHARE_PAGE, loadShare, shareHttpStatus } from './server/shares'
 import { isProduction } from './server/util'
 import type { VideoJobMessage } from './server/types'
 
 // mock 收银台页面（/checkout/mock、/zh/checkout/mock）：生产环境它调用的接口都是 404，页面本身也不该能打开
 const MOCK_CHECKOUT_PAGE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?checkout\/mock$/i
+// 支付结果页：支付商回跳时会附带 email 等参数（Dodo 带买家邮箱），只保留 order
+const CHECKOUT_RESULT_PAGE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?checkout\/success$/i
 
 const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
@@ -28,12 +32,29 @@ export default {
       url.pathname = pathname.replace(/\/+$/, '') || '/'
       return withSecurityHeaders(Response.redirect(url.toString(), 301), env, url)
     }
+    // 先 302 去掉多余参数再渲染：邮箱不会进页面、前端统计、错误上报和浏览器历史（第一次请求的 URL 仍会出现在 Workers 日志里）
+    if (request.method === 'GET' && CHECKOUT_RESULT_PAGE.test(pathname) && [...url.searchParams.keys()].some((key) => key !== 'order')) {
+      const order = url.searchParams.get('order')
+      url.search = order ? `?order=${encodeURIComponent(order)}` : ''
+      const response = new Response(null, { status: 302, headers: { Location: `${url.pathname}${url.search}`, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } })
+      return withSecurityHeaders(response, env, url)
+    }
     if (isProduction(env) && MOCK_CHECKOUT_PAGE.test(pathname)) {
       return withSecurityHeaders(new Response('Not found', { status: 404, headers: { 'X-Robots-Tag': 'noindex' } }), env, url)
     }
     // 页面请求生成 CSP nonce，经请求上下文交给 router（src/router.tsx 的 ssr.nonce），内联脚本都会带上它
     const nonce = toHono ? undefined : createNonce()
-    const response = nonce ? await handler.fetch(request, { context: { nonce } }) : await app.fetch(request, env, ctx)
+    // 分享页：先查好数据交给页面渲染 OG 标签，失效的链接返回 404/410；页面一律 noindex（用户内容不进搜索引擎）
+    const shareId = !toHono && request.method === 'GET' ? pathname.match(SHARE_PAGE)?.[1] : undefined
+    const share = shareId !== undefined ? await loadShare(env, shareId) : undefined
+    let response = nonce ? await handler.fetch(request, { context: { nonce, share } }) : await app.fetch(request, env, ctx)
+    if (share) {
+      const headers = new Headers(response.headers)
+      headers.set('X-Robots-Tag', 'noindex')
+      headers.set('Cache-Control', 'no-store')
+      const status = response.status === 200 ? shareHttpStatus(share) : response.status
+      response = new Response(response.body, { status, statusText: '', headers })
+    }
     if (import.meta.env.DEV) await drainUnreadBody(request)
     return withSecurityHeaders(response, env, url, nonce)
   },
@@ -48,6 +69,7 @@ export default {
     ctx.waitUntil(runScheduledMaintenance(env))
     ctx.waitUntil(runNotificationCron(env))
     ctx.waitUntil(runHealthCheck(env).catch((error) => console.error('[alert] health check failed', error)))
+    ctx.waitUntil(runDailyBackup(env).catch((error) => console.error('[alert] d1 backup failed', error)))
   },
 } satisfies ExportedHandler<Env, VideoJobMessage>
 

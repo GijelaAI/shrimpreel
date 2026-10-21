@@ -15,14 +15,14 @@
 - 已具备：
   - 用户与积分：Google 登录（含 One Tap）、积分包、月付和年付订阅、积分流水、个人中心（视频/账单/设置/兑换码/邀请链接/注销/导出我的数据）；账单显示实付与退款，订单和积分流水可分页加载，每笔订单有可打印的详情页（税务发票由支付商出具）
   - 订单与生成：订单与部分/全额退款回收、生成任务队列（含死信队列）与失败退积分
-  - 增长与运营：来源归因（UTM 与广告点击 ID，首次和最近触达）、访问 → 注册 → 下单 → 支付 → 生成漏斗、GA4 事件（带同意横幅）
+  - 增长与运营：来源归因（UTM 与广告点击 ID，首次和最近触达）、访问 → 注册 → 下单 → 支付 → 生成漏斗、GA4 事件（带同意横幅）、成片公开分享页（用户自己开启，带链接预览图）
   - 管理后台：概览（含服务商成本与毛利）、用户、订单、生成、举报下架、留言、支付事件、邮件、审计、经营报表与订单 CSV、兑换码、邀请排行、运营设置与测试连接
     - 用户：按状态、角色、是否付费筛选，按注册时间、最近登录、积分排序；详情页有累计付款、生成统计、订单、积分批次与流水和针对该用户的管理员操作（补发可设有效期）
     - 订单：按订单号、邮箱、支付商流水号搜索；详情页把支付回调、积分变动、管理员操作和邮件合成一条时间线，可在详情页退款、查单或补单
     - 生成：按任务 ID、邮箱、服务商请求 ID 搜索
-  - 交易邮件：积分到账、成片完成、生成失败退积分、举报回执与处理结果；管理员收新举报、超时提醒和新留言（Cloudflare Email Service，发件箱去重与重试）
+  - 交易邮件：积分到账、成片完成、生成失败退积分、举报回执（仅登录用户）与处理结果；管理员收新举报、超时提醒和新留言（Cloudflare Email Service，发件箱去重与重试）
   - 合规与内容安全：成片 AI 标识；照片 7 天、成片 30 天自动清理；举报下架（48 小时队列，同一张原图的全部成片一并删除并拉黑）；上传图片审核；联系和举报表单的 Turnstile 人机验证
-  - 运维与安全：后台免部署切换维护模式、全站公告和每日生成上限；健康检查告警邮件、前端错误上报到 Workers 日志、CSP（Report-Only，每次请求一个 nonce）与 Permissions-Policy
+  - 运维与安全：后台免部署切换维护模式、全站公告和每日生成上限；健康检查告警邮件、付款即时通知（Telegram、飞书、Discord 等）、D1 每日备份到 R2、前端错误上报到 Workers 日志、CSP（Report-Only，每次请求一个 nonce）与 Permissions-Policy
   - 内容与 SEO：one-page 首页（How it works / What is 区块，可选的痛点和“自己拍 vs 用本站”对比区块）、可扩展的文章集合（`/guides` 列表页、相关文章）、法律页、联系表单；SSR 输出完整的 canonical、hreflang、JSON-LD 和 sitemap；文案按语言拆包；`npm run seo:check` 检查全站
 
 功能建议与后续规划见 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 和 [ROADMAP.md](ROADMAP.md)。SEO 规则、关键词规划和审计结果见 [docs/SEO_AUDIT.md](docs/SEO_AUDIT.md)。全部环境变量和 `site.ts` 上线字段见 [docs/env.md](docs/env.md)，新增支付商的步骤与 webhook 返回码约定见 [docs/payments.md](docs/payments.md)，订阅的开关、套餐和支付商配置见 [docs/subscriptions.md](docs/subscriptions.md)，改代码前的约定（积分、支付入账、双语文案、迁移、e2e）见 [AGENTS.md](AGENTS.md)。
@@ -240,6 +240,12 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - 退款事件先于付款事件到达（付款回调还在重试）时记为失败并返回 5xx，等付款入账后由支付商重试。
   - webhook 丢失或迟到时主动向支付商查单（`src/server/reconcile.ts`；Dodo 查 checkout session 再取 payment，Waffo 用 GraphQL `payments` 按商户订单号查）：成功页在约 15 秒和 60 秒时各查一次；5 分钟 Cron 查创建 10 分钟到 24 小时之间的 pending 订单，指数退避（约 10、20、40……分钟，每轮最多 10 单）；后台订单详情有“查单”按钮，补单前先用。查到的付款和 webhook 走同一套核对与幂等键，迟到的 webhook 不会重复入账。浏览器只能传订单号，不能传付款状态。已有 `mismatch` 事件的订单留给人工核对。
 - **生成**：先扣积分再入队，失败、超时或管理员判失败时自动退回。视频服务商的 webhook 和定时轮询可能同时处理同一个任务，只有一路能把任务置为成功，另一路不会删掉已落库的成片。
+- **成片分享**：用户在个人中心对自己的成片点“分享”，生成公开链接 `/v/<随机串>`（16 位，不可枚举，`/zh/v/…` 同样可用）。默认开启；`site.share.enabled` 设为 `false` 时按钮和页面都不出现，换脸、真人类站点建议关闭。
+  - 分享页只有视频、AI 角标与声明、“我也做一条”按钮和举报入口，不显示作者信息，HTML 和接口里也没有视频 ID。响应头和 meta 都是 `noindex`，不进 sitemap。
+  - 链接预览：开启分享时浏览器从成片截一帧，画成 1200×630 的 JPEG（左上角带 AI 标识）一起上传，作为 `og:image`，成片地址写进 `og:video`。封面和上传照片一样过图片审核（不通过返回 422 `share_rejected`）；截帧失败（浏览器解码不了、超时）时不带封面，用站点默认 OG 图。
+  - 媒体走 `/media/shares/<id>/video` 和 `/media/shares/<id>/poster.jpg`，支持 Range，`Cache-Control: public, max-age=300`，所以停止分享后已打开过的访客最多还能从缓存播放 5 分钟。
+  - 失效：停止分享后旧链接返回 404，再分享得到新链接；成片到期或因举报下架返回 410，封面随之删除，之后不能再分享；删除视频时封面一并删除。
+  - 迁移 `0015_shares.sql` 给 `generations` 加了 `share_id`、`share_poster_key`、`shared_at`。导出我的数据包含分享链接和开启时间；功能开启时隐私政策多一节“分享的视频”。
 - **成本与毛利**：出片时把服务商成本写入 `generations.provider_cost_cents`：yir 账单已结算时记实际扣费，其余按 `site.video` 里的单价估算。
   - fal 按帧计费，16 帧算 1 个视频秒，480p 为 $0.04/视频秒（[价格](https://fal.ai/models/fal-ai/wan/v2.2-14b/animate/replace)）。模板源视频是 24fps，所以成片每秒 6 美分，18 秒约 $1.08。换模型、分辨率或源视频帧率时更新 `costCentsPerVideoSecond` 和 `sourceFps`。
   - 出片后才被判失败的任务（超时、管理员判失败）照样记成本；没出片的失败任务不记。mock 记 0。
@@ -255,6 +261,12 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 - **安全**：非 GET 的 `/api/*`（webhook、CSP 报告和前端错误上报除外）要求 `Origin` 与站点同源；上传按文件头校验真实类型；上传和生成按用户限流；封禁用户会立即使会话失效；管理操作写入 `admin_audit`。
   - 登录后的 `redirect`（登录页和 Google 回调）只接受站内路径：`src/lib/redirect.ts` 拒绝反斜杠、控制字符，以及规范化后以 `//` 开头的地址，所以 `/sign-in?redirect=/\evil.com` 这类链接会落到个人中心。
   - 5xx 错误只对管理员返回 `message`；其他人只拿到错误码，详情以 `[api] <method> <path> <code>: <message>` 写入 Workers Logs。
+  - Google 登录：授权码流程带 PKCE（S256）和 nonce；One Tap 初始化前先从 `/api/auth/google/nonce` 取 nonce（同时写进 cookie），提交时两者必须一致。
+  - 账号以 Google 的 `sub` 为准：同一邮箱换了 Google 账号（`sub` 不同）会被拒绝登录，登录页提示联系客服（`account_conflict`）；dev 登录建的账号（没有 `sub`）在第一次 Google 登录时绑定。
+  - 注销账号只保留邮箱的加盐哈希（`deleted_accounts` 表，盐是 `SESSION_SECRET`），同一邮箱重新注册时不发注册赠送、不绑定邀请人。更换 `SESSION_SECRET` 后旧记录对不上。
+  - 上传请求必须带 `Content-Length`（否则 411），超过上限直接 413，不读请求体。服务商成片超过 100 MB 判失败并退积分；带长度时流式写入 R2，没带长度时边读边计数，超过 48 MB 即停止。
+  - 支付结果页带 `order` 以外的参数（Dodo 回跳会附带买家邮箱）时，Worker 先 302 去掉再渲染，邮箱不会进入页面、统计、错误上报和浏览器历史；第一次请求的 URL 仍会出现在 Workers 日志里。
+  - 举报表单不需要登录：回执只发给已登录、且填的是本人账号邮箱的举报人，防止表单被用来给任意地址发信；举报编号在提交后的页面上显示，处理结果仍发到填写的邮箱。
   - 报告安全漏洞见 [SECURITY.md](SECURITY.md)。
 - **CSP**：页面响应带 `Content-Security-Policy-Report-Only`，策略在 `src/server/csp.ts`。
   - 每次请求生成 nonce（`src/server.ts` → `src/router.tsx` 的 `ssr.nonce`），框架输出的内联脚本都会带上它，`script-src` 不放开 `'unsafe-inline'`。自定义内联脚本放进 `__root.tsx` 的 `headScripts()`，不要直接写 `<script>`。
@@ -264,7 +276,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 
 ## 合规与内容安全
 
-- **AI 标识**：生成器和个人中心的播放器左上角有 “AI-generated” 角标，下方提示分享时保留标识。下载文件名为 `<brand>-ai-video-<视频 ID>.mp4`，举报人凭文件名即可定位。成片里没有烧录水印，也没有写入 C2PA（需要 Containers，见 [FEATURES P0-1](docs/SAAS_VIDEO_FEATURES.md)）。
+- **AI 标识**：生成器和个人中心的播放器左上角有 “AI-generated” 角标，下方提示分享时保留标识。下载文件名为 `<brand>-ai-video-<视频 ID>.mp4`，举报人凭文件名即可定位。成片里没有烧录水印，也没有写入 C2PA（需要 Containers，见 [FEATURES P0-1](docs/SAAS_VIDEO_FEATURES.md)）。分享页同样显示角标和 AI 生成声明，链接预览图左上角也带 AI 标识。
 - **数据保留**：由 `site.retention` 控制，默认原图 7 天、成片 30 天，隐私政策文案自动读取这两个天数。
   - 每 5 分钟的 Cron 删除到期的 R2 对象，并在 D1 记 `expired_at`，每类每次最多处理 90 条。进行中任务用到的原图不删。
   - 过期后个人中心显示“已过期”，视频接口返回 410 `media_expired`。订单和积分流水不受影响。
@@ -274,11 +286,11 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
     npx wrangler r2 bucket lifecycle add <name>-media expire-outputs outputs/ --expire-days 31
     ```
 - **举报下架**：页脚 “Report content” 进入 `/report`，无需登录。
-  - 表单字段：签名、邮箱、内容定位、原因、未同意声明。提交后写入 `takedown_requests`，截止时间为 48 小时后（`site.takedownSlaHours`）。内容定位里能识别出 `gen_` 视频 ID 时自动关联。
+  - 表单字段：签名、邮箱、内容定位、原因、未同意声明。提交后写入 `takedown_requests`，截止时间为 48 小时后（`site.takedownSlaHours`）。内容定位里能识别出 `gen_` 视频 ID 或分享链接（`/v/<id>`，可带语言前缀）时自动关联；分享页的举报入口会把分享地址预填进表单。
   - 管理员在 `/admin/takedowns` 处理，概览页显示待处理数和超时数。
   - 下架：按原图 SHA-256 找出同一张照片的全部上传和成片，然后：
     - 进行中的任务判失败并退积分；
-    - 删除 R2 对象并标记 `removed_at`；
+    - 删除 R2 对象（含分享封面）并标记 `removed_at`，分享链接返回 410；
     - 哈希写入 `blocked_media`，此后再上传同一张图返回 422 `content_rejected`。
   - 驳回：必须填写原因。
   - 两种处理都写入 `admin_audit`。新举报、截止前 12 小时和超时时会给 `ADMIN_EMAILS` 发邮件（见“交易邮件”），但仍需要有人每天看队列。
@@ -293,15 +305,23 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 - **统计与 Cookie**：在 `site.analytics` 配置，隐私政策的“Cookie 与统计”一节会按配置自动调整。
   - 推荐只填 `cfBeaconToken`（Cloudflare Web Analytics）：不写 Cookie，不需要同意横幅。
   - 填了 `ga4Id` 才启用 GA4，同时出现同意横幅和页脚 “Cookie settings”。采用 Consent Mode v2 basic 模式：访客接受前不加载 gtag.js，事件只进 `dataLayer`；广告类同意项始终为 denied。拒绝或撤回时删除 `_ga`、`_ga_*`、`_gid`（当前主机和各级父域）。选择存在 `localStorage` 的 `consent.analytics`，逻辑见 `src/lib/consent.ts`。
-  - 来源归因写第一方 Cookie `vt_attr`（90 天），不经过同意横幅。按欧盟 ePrivacy 的严格解释，非必要的第一方 Cookie 也需要事先同意；主要面向欧盟用户时，应把它也放到同意之后。
+  - 来源归因写第一方 Cookie `vt_attr`（90 天）。填了 `ga4Id` 时它和 GA4 一样等访客接受后才写入：接受时补记本次访问的来源，拒绝或撤回时删除；没写 Cookie 的访客，注册和订单记为 direct，访问统计照常计数。没填 `ga4Id` 时没有横幅，`vt_attr` 直接写入；按欧盟 ePrivacy 的严格解释这也需要事先同意，主要面向欧盟用户时应启用横幅。逻辑见 `src/lib/attribution.ts`。
 - **导出我的数据**（GDPR 第 15、20 条）：个人中心设置页可下载 JSON（`GET /api/account/export`），包含账号、会话、订单、积分流水与批次、上传与生成记录、留言、本人提交的举报和发信记录；按用户限流。不含 R2 路径、服务商请求 ID、内部错误信息和成本，也不含他人针对本人视频的举报。媒体文件不打包，仍在保留期内的可从个人中心下载。字段清单见 `src/server/account-export.ts`。
-- **数据库备份**：D1 Time Travel 可以恢复到 30 天内的任意时间点（Workers Free 为 7 天），但恢复会原地覆盖数据库：`npx wrangler d1 time-travel restore <db> --timestamp=<unix>`。长期留档用 `npx wrangler d1 export <db> --remote --output backup-<date>.sql` 定期导出；自动导出到 R2 的 Workflow 还没做。
+- **数据库备份**：每 5 分钟的 Cron 发现当天（UTC）还没有备份时，把 D1 导出成 SQL（建表语句加全部数据，`sessions` 只导结构），gzip 后存到 MEDIA 的 `backups/d1/<日期>.sql.gz`，保留 30 天（`src/server/backup.ts`）。当天最多尝试 3 次，第 3 次仍失败时给 `ADMIN_EMAILS` 发 `backup_failed` 告警。`backups/` 没有公开路由，R2 生命周期规则也不要覆盖它。
+  - 恢复到一个新建的空数据库（不要先跑迁移，备份里带 `d1_migrations` 记录）。先不加 `--apply` 只出计划（下载、统计各表行数、检查目标库为空），确认后再导入：
+    ```bash
+    node scripts/restore-d1.mjs --date 2026-10-21 --remote --database <新库名>
+    node scripts/restore-d1.mjs --date 2026-10-21 --remote --database <新库名> --apply
+    ```
+    然后把 `wrangler.jsonc` 的 `database_id` 指向新库并重新部署。备份不含会话，恢复后所有人需要重新登录。
+  - D1 Time Travel 可以恢复到 30 天内的任意时间点（Workers Free 为 7 天），但会原地覆盖数据库：`npx wrangler d1 time-travel restore <db> --timestamp=<unix>`。误操作先用 Time Travel；R2 里的备份用于更久的留存、数据库被整个删除或换账号迁移。
+  - 本地可以 `POST /api/dev/backup` 立即导出一次（只接受本机直连），再用 `--file <路径> --local --persist-to <目录>` 恢复到一份独立的本地状态核对。
 
 ## 交易邮件
 
 用 [Cloudflare Email Service](https://developers.cloudflare.com/email-service/)（public beta）从 Worker 直接发信：`send_email` binding 名为 `EMAIL`，发件地址是 `vars.EMAIL_FROM`。
 
-- **发给用户**：积分到账、成片完成（附保留截止日期）、生成失败退积分、举报回执、举报处理结果、视频因举报被删除。语言跟随用户最近一次下单或生成时所用的界面语言，举报相关邮件用举报时的页面语言。已注销或封禁的用户不发。
+- **发给用户**：积分到账、成片完成（附保留截止日期）、生成失败退积分、举报回执（只发给填写本人账号邮箱的登录用户）、举报处理结果、视频因举报被删除。语言跟随用户最近一次下单或生成时所用的界面语言，举报相关邮件用举报时的页面语言。已注销或封禁的用户不发。
 - **发给管理员**（`ADMIN_EMAILS`，中文）：新举报；截止前 12 小时和超时后各提醒一次；新留言（Reply-To 是留言人）。留言人不会收到自动回复，避免表单被用来向任意邮箱发信。
 - **发送方式**：业务事件先写入 D1 的 `email_outbox` 表，`dedupe_key` 唯一（如 `order_paid:<订单号>`）。webhook 重放、队列重投、Cron 重叠都只发一封。
   - 写入后立即发送。遇到限流、日配额或服务端错误时，按 5、15、45… 分钟退避，最多 5 次，由每 5 分钟的 Cron 补发；发件人未验证等永久错误直接记为失败。
@@ -330,6 +350,8 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 
 - **去重**：同一类告警每 6 小时（UTC 时间桶）最多发一次，`dedupe_key` 为 `admin_alert:<类型>:<桶>:<管理员邮箱>`。问题持续存在时，下一个时间桶再提醒。
 - **死信队列**：主队列消息重试 10 次（约 35 分钟）仍失败会进入 `<name>-jobs-dlq`。同一个 Worker 消费死信队列（`src/server.ts` 按队列名的 `-dlq` 后缀分流），把任务判为失败（`error_code = dead_letter`）并退积分，用户会收到生成失败邮件。新站点要同时创建两个队列（见“部署到 Cloudflare”），`new-site.mjs` 会一并改名。
+- **D1 备份失败**：不在上表的健康检查里；当天第 3 次导出仍失败时发一封 `backup_failed` 告警，见“合规与内容安全”的“数据库备份”。
+- **付款即时通知**：配置 secret `PAYMENT_NOTIFY_WEBHOOK_URL` 后，每笔订单首次入账（含续费和后台补单）往 Telegram、飞书 / Lark、Discord 或 Slack 群发一条消息：金额、套餐、积分、来源和订单号。地址格式见 [docs/env.md](docs/env.md)。发送失败只写日志，不影响入账；日志和报错里不出现 webhook 地址（里面带 token）。
 - 发信本身出问题（域名未验证、配额用完）时告警邮件也可能发不出去，此时以 Workers 日志里的 `[alert]` 为准。需要第二通道时，可以用 Workers Logpush 把日志推到外部监控服务，按 `[alert]` 设置通知。
 - **前端错误**：浏览器里未捕获的异常、未处理的 Promise 拒绝和错误页渲染失败，由 `src/lib/error-report.ts` 用 `sendBeacon` 发到 `/api/client-error`，只写 Workers 日志：`[client-error] id=… kind=error|rejection|boundary page=… message=… stack=…`。
   - 错误页显示错误编号，用户反馈时在 Workers Logs 里搜 `id=<编号>` 即可找到堆栈。
@@ -340,7 +362,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 
 ```bash
 npm run typecheck
-npm test            # vitest：Waffo/Dodo 验签与事件映射、退款比例与退款单号规则、归因解析、生产环境禁用 mock、Turnstile 与图片审核的错误分支、邮件模板与发送重试判定、告警阈值与时间桶、GA4 同意前不加载与撤回删 Cookie、CSP 报告和前端错误上报的摘要与脱敏、登录跳转校验、5xx 详情不对非管理员返回、生产环境拒绝弱 SESSION_SECRET、上线配置检查与 doctor 的规则和 wrangler 输出解析、模板同步计划的分层、密钥同步计划的校验与脱敏、积分账务、兑换码、邀请奖励与订阅（日历月、年付补发、续费、乱序事件、周期校正时当期积分到期时间对齐、退款、Dodo/Waffo 事件映射，SQLite）、运营设置的校验缓存与每日上限、测试连接与脱敏、e2e 验收目录与用例一致
+npm test            # vitest：Waffo/Dodo 验签与事件映射、退款比例与退款单号规则、归因解析、生产环境禁用 mock、Turnstile 与图片审核的错误分支、邮件模板与发送重试判定、告警阈值与时间桶、GA4 同意前不加载与撤回删 Cookie、CSP 报告和前端错误上报的摘要与脱敏、登录跳转校验、Google 登录的 PKCE 与 nonce、账号按 sub 绑定与注销邮箱不再领注册赠送、成片下载大小上限、D1 备份的 SQL 转义、付款通知的消息格式与地址脱敏、归因 Cookie 等同意后才写入、5xx 详情不对非管理员返回、生产环境拒绝弱 SESSION_SECRET、上线配置检查与 doctor 的规则和 wrangler 输出解析、模板同步计划的分层、密钥同步计划的校验与脱敏、积分账务、兑换码、邀请奖励与订阅（日历月、年付补发、续费、乱序事件、周期校正时当期积分到期时间对齐、退款、Dodo/Waffo 事件映射，SQLite）、运营设置的校验缓存与每日上限、测试连接与脱敏、e2e 验收目录与用例一致
 npm run test:e2e    # Playwright：需要先 npm run seed:local；会复用已运行在 127.0.0.1:3000 的 dev server
 E2E_PORT=3200 npm run test:e2e   # 3000 被其它程序占用时换端口
 npm run seo:check   # 需要 dev server 在跑；报告写到 .tmp/seo-check/
@@ -350,23 +372,24 @@ SANDBOX_PROVIDER=dodo E2E_PORT=3200 npm run test:sandbox   # 支付商 test 模�
 
 按风险分级的 e2e 验收目录和未覆盖项见 [tests/e2e/CATALOG.md](tests/e2e/CATALOG.md)。新增或改名用例时要同步更新，`npm test` 会核对两边是否一致。sandbox e2e 的前提、webhook 模式和测试卡见 [docs/payments.md](docs/payments.md) 的“sandbox e2e”。
 
-e2e 覆盖（62 个用例）：
-- 购买与生成：完整主路径（含中文站路径和 AI 角标）、支付失败、未登录回到结果页（含地址栏去掉邮箱）、余额不足、生成失败退款；3 路轮询并发处理同一任务时只落库一次、成片不被误删，后台显示成本与毛利。
+e2e 覆盖（64 个用例）：
+- 购买与生成：完整主路径（含中文站路径和 AI 角标）、支付失败、未登录回到结果页（邮箱在渲染前被 302 去掉）、余额不足、生成失败退款；3 路轮询并发处理同一任务时只落库一次、成片不被误删，后台显示成本与毛利。
 - 合规：
   - 保留期：进行中任务的原图不清理；到期原图不能再用；成片过期返回 410，个人中心显示已过期；重复清理是幂等的。
   - 举报下架：匿名在 `/report` 举报，管理员在后台下架。同一张原图的两条成片都被删除，无关成片保留，重新上传同一张图被拦截；已处理的举报不能再处理，处理结果写入审计。
   - 审核：不通过的上传返回 422。
   - 导出我的数据：设置页下载的 JSON 含本人全部记录，不含他人数据和内部字段；未登录和注销后返回 401。
+  - 成片分享：个人中心开启后，匿名访客看到 noindex 的分享页和 AI 标识，页面不暴露视频 ID；他人不能开启或停止分享；停止分享后旧链接 404，成片到期或被举报下架后 410；封面不是 JPEG 或审核不通过被拒；凭带语言前缀的分享链接举报即可定位视频。
 - 积分批次：后台补发限时积分后，生成先扣它、失败原路退回，到期作废后账单页提示消失；余额只够一次时并发发起两个生成，一个成功一个 402。账务规则另有单元测试在 SQLite 上执行全部迁移核对。
 - 兑换码：后台生成一批并导出 CSV、停用其中一个；用户在设置页兑换，积分带有效期；重复兑换、次数用完、停用或格式不对的码、非管理员访问都被拒绝；可用 3 次的活动码被 5 个用户同时兑换，只有 3 个成功。
 - 邀请奖励：好友经设置页的链接注册、首单付款后邀请人只拿一次奖励；第二单、其他用户的订单、无效码和老用户都不发；首单退款后奖励只回收一次；同一 IP 超出上限的注册被拒绝，后台显示原因；导出数据只含本人这一侧。
 - 运营设置：只有管理员能读写，未知参数或越界值整体拒绝；注册赠送和有效期改后立即用于新用户，审计记前后值；维护模式下生成和下单返回 503，已建订单的付款照常入账，管理员不受限，中英文页面都显示提示条；公告按语言显示；每日上限返回 429 且不扣积分；后台页面只提交改动项，本地各项测试连接都正常。
 - 订阅：月付从定价页订阅、积分随当期作废、续费重放只入账一次、少付的转人工、扣款失败与恢复、账单页到期取消与撤销、客户门户、续费期间拒绝再订阅和注销、终止后可重新订阅；年付按月补发（Cron 重复执行不重发）、迟到的旧状态事件被忽略、退款只回收订阅积分并停止补发。
 - 告警与死信：任务进死信后判失败、只退一次积分；健康检查触发失败率和死信告警，同一时间桶重复执行不重发。
-- 交易邮件：支付回调重放只发一封、语言跟随用户；生成成功与失败各一封，重复判失败不重发；举报回执、临近截止与超时提醒各一次、下架后通知举报人和作者且不再提醒；留言只提醒管理员；注销清除发件记录；后台邮件页。
+- 交易邮件：支付回调重放只发一封、语言跟随用户；生成成功与失败各一封，重复判失败不重发；未登录举报不发回执、登录用户填本人邮箱才发，临近截止与超时提醒各一次、下架后通知举报人和作者且不再提醒；留言只提醒管理员；注销清除发件记录；后台邮件页。
 - 支付事件与退款：并发和重放支付事件、部分消费后退款、两次部分退款、管理员退款时补登后迟到的同号 webhook 不重复扣；退款先于付款到达时重试后照常回收；少付或套餐不符不入账并告警、退款后结案，折扣码和换币种照常入账，孤儿事件告警、其他站点的事件忽略；webhook 丢失时成功页和 Cron 都能查单补救（指数退避、5 个并发查单只入账一次、迟到的 webhook 不重复入账、别人的订单返回 404、少付的付款不再自动重查），后台查单能直接入账或提示人工核对。
 - 订单与用户数据：账单和订单详情显示实付与部分退款，他人订单接口返回 404、页面显示找不到；后台搜索订单、退款金额无效时拦下可重试、部分退款与补单后时间线完整；用户按付费、封禁筛选和按积分排序，非法排序值不进 SQL；积分流水超过一页时加载更多不重不漏。
-- 安全与权限：CSRF、伪造上传和越权、后台权限、后台概览的配置检查不回传密钥值、积分调整和封禁、dev 登录与 mock 支付只接受本机直连；登录后的站外 `redirect` 回退到个人中心，登录页遇到未知错误码（如 `__proto__`）显示通用提示。
+- 安全与权限：CSRF、伪造上传和越权、后台权限、后台概览的配置检查不回传密钥值、积分调整和封禁、dev 登录与 mock 支付只接受本机直连；登录后的站外 `redirect` 回退到个人中心，登录页遇到未知错误码（如 `__proto__`）显示通用提示；支付结果页带的邮箱参数在渲染前就被 302 去掉。
 - 安全响应头：内联脚本都带本次请求的 nonce；公开页、登录后生成和后台浏览器内零 CSP 违规；注入不带 nonce 的脚本会被报告；报告接口不受同源校验影响。
 - 前端错误上报：全局异常和未处理的拒绝各报一次、页面地址不带 query，重复错误不重报，每页最多 5 条；渲染出错时错误页显示的编号与上报一致，接口恢复后点重试回到正常页面。
 - 归因与报表：UTM 归因跨会话保持、报表和 CSV。

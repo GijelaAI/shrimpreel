@@ -1,9 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { Download, Trash2 } from 'lucide-react'
+import { Download, Share2, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { AiBadge, ErrorText, Spinner, StatusPill, formatDate } from '#/components/ui'
+import { site } from '#/config/site'
 import { api, errorCode, isActiveGeneration, type Generation } from '#/lib/api'
-import { useContent, useLocale } from '#/lib/i18n'
+import { useContent, useLocale, useLocalePath } from '#/lib/i18n'
+import { captureSharePoster } from '#/lib/share-poster'
 import { useSession } from '#/lib/session'
 
 export const Route = createFileRoute('/{-$locale}/dashboard/')({
@@ -16,9 +18,12 @@ function VideosPage() {
   const c = useContent()
   const d = c.dashboard
   const locale = useLocale()
+  const lp = useLocalePath()
   const { refresh } = useSession()
   const [items, setItems] = useState<Generation[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [sharing, setSharing] = useState<string | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -54,6 +59,48 @@ function VideosPage() {
       setItems((list) => list?.filter((g) => g.id !== id) ?? null)
     } catch (err) {
       setError(errorCode(err))
+    }
+  }
+
+  function setShareId(id: string, shareId: string | null) {
+    setItems((list) => list?.map((g) => (g.id === id ? { ...g, shareId } : g)) ?? null)
+  }
+
+  // 分享：先在浏览器里截一帧做链接预览图（失败就不带，分享页用站点默认图），再生成公开链接
+  async function share(g: Generation) {
+    if (!g.videoUrl || !confirm(d.confirmShare)) return
+    setSharing(g.id)
+    try {
+      const poster = await captureSharePoster(g.videoUrl, c.common.aiGenerated)
+      const { shareId } = await api<{ shareId: string }>(`/api/generations/${g.id}/share`, { method: 'POST', blob: poster ?? undefined })
+      setShareId(g.id, shareId)
+      setError(null)
+    } catch (err) {
+      setError(errorCode(err))
+    } finally {
+      setSharing(null)
+    }
+  }
+
+  async function unshare(g: Generation) {
+    if (!confirm(d.confirmStopSharing)) return
+    try {
+      await api(`/api/generations/${g.id}/share`, { method: 'DELETE' })
+      setShareId(g.id, null)
+      setCopied(null)
+    } catch (err) {
+      setError(errorCode(err))
+    }
+  }
+
+  async function copyLink(shareId: string, id: string) {
+    const url = `${window.location.origin}${lp(`/v/${shareId}`)}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(id)
+    } catch {
+      // 剪贴板不可用（非 https、权限被拒）时让用户手动复制
+      prompt(d.copyPrompt, url)
     }
   }
 
@@ -101,15 +148,42 @@ function VideosPage() {
               {g.expiresAt ? <p className="text-xs text-muted">{d.expiresOn(formatDate(g.expiresAt, locale))}</p> : null}
               {g.status === 'failed' && g.refunded ? <p className="text-xs text-emerald-700 dark:text-emerald-400">{d.refundedNote}</p> : null}
               {!isActiveGeneration(g) ? (
-                <div className="flex gap-2 pt-1">
+                <div className="flex flex-wrap gap-2 pt-1">
                   {g.videoUrl ? (
                     <a href={`${g.videoUrl}?download=1`} className="btn-ghost px-3 py-1.5 text-xs" download>
                       <Download className="size-3.5" /> {d.download}
                     </a>
                   ) : null}
+                  {g.videoUrl && site.share.enabled && !g.shareId ? (
+                    <button
+                      type="button"
+                      className="btn-ghost px-3 py-1.5 text-xs"
+                      onClick={() => share(g)}
+                      disabled={sharing === g.id}
+                      data-testid="share-button"
+                    >
+                      {sharing === g.id ? <Spinner className="size-3.5" /> : <Share2 className="size-3.5" />} {d.share}
+                    </button>
+                  ) : null}
                   <button type="button" className="btn-ghost px-3 py-1.5 text-xs" onClick={() => remove(g.id)}>
                     <Trash2 className="size-3.5" /> {d.delete}
                   </button>
+                </div>
+              ) : null}
+              {g.videoUrl && g.shareId ? (
+                <div className="space-y-1.5 rounded-lg bg-bg-soft p-2.5 text-xs" data-testid="share-controls">
+                  <p className="text-muted">{d.sharedNote}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    <a href={lp(`/v/${g.shareId}`)} target="_blank" rel="noopener" className="underline underline-offset-2" data-testid="share-link">
+                      {d.openSharePage}
+                    </a>
+                    <button type="button" className="underline underline-offset-2" onClick={() => copyLink(g.shareId!, g.id)}>
+                      {copied === g.id ? d.linkCopied : d.copyLink}
+                    </button>
+                    <button type="button" className="underline underline-offset-2" onClick={() => unshare(g)} data-testid="stop-sharing">
+                      {d.stopSharing}
+                    </button>
+                  </div>
                 </div>
               ) : null}
             </div>

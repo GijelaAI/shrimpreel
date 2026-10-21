@@ -100,6 +100,9 @@ export interface GenerationRow {
   updated_at: string
   expired_at: string | null
   removed_at: string | null
+  share_id: string | null
+  share_poster_key: string | null
+  shared_at: string | null
 }
 
 export interface UploadRow {

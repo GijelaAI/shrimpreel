@@ -30,6 +30,8 @@ export const ALERT_RULES = {
   payment_review: { windowMinutes: 24 * 60, min: 1 },
   // 最近 6 小时创建的邮件（不含告警邮件）里最终失败、或重试 ≥ 3 次仍未发出的 ≥ 3 封（完整重试约 3.3 小时）
   email_failures: { windowMinutes: 6 * 60, min: 3 },
+  // D1 每日备份当天连续失败 3 次（src/server/backup.ts 直接发，不经 evaluateHealth）
+  backup_failed: { windowMinutes: 24 * 60, min: 3 },
 } as const
 
 const EMAIL_STUCK_ATTEMPTS = 3

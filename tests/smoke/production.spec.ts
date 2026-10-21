@@ -90,6 +90,7 @@ test('开发与 mock 入口全部关闭：同源 POST 也是 404，页面也打�
     '/api/dev/mock-finish',
     '/api/dev/reconcile-sweep',
     '/api/dev/health-check',
+    '/api/dev/backup',
   ]
   const wrong: string[] = []
   for (const path of devPosts) {

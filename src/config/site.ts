@@ -120,6 +120,12 @@ export const site = {
   // 举报下架的处理时限（小时），TAKE IT DOWN Act 要求 48 小时内删除
   takedownSlaHours: 48,
 
+  // 成片公开分享（/v/<随机串>）：用户在个人中心主动开启，页面 noindex，带 AI 标识和举报入口；
+  // 成片到期、下架、删除或停止分享后链接失效。换脸、真人类站点风险高时设为 false（按钮和页面都不出现）
+  share: {
+    enabled: true,
+  },
+
   // SEO 文章（指南），按展示顺序排列。slug 是根路径：/<slug> 与 /zh/<slug>；正文在 src/content/<locale>.ts 的 articles[key]。
   // 新增文章：这里加一项，各语言 content 的 articles 补同名 key（缺了 typecheck 会报错）。
   // trend、howTo 两篇被首页直接链接，不要删。related 不填时推荐其余文章里最近更新的。

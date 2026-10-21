@@ -237,4 +237,15 @@ test('导出我的数据：设置页下载 JSON，含本人全部记录；不含
   // 注销后会话失效，不能再导出
   await json(request.delete('/api/account', { headers: { origin: ORIGIN } }))
   expect((await request.get('/api/account/export')).status()).toBe(401)
+
+  // 驳回这两条举报：后台队列每页 50 条，未处理的越积越多会把其它用例的举报挤到第二页
+  const admin = await browser.newContext({ baseURL: ORIGIN })
+  try {
+    await devLogin(admin.request, ADMIN_EMAIL)
+    for (const id of [ownReport, otherReport!]) {
+      await json(post(admin.request, `/api/admin/takedowns/${id}/resolve`, { action: 'reject', note: 'e2e: cleanup' }))
+    }
+  } finally {
+    await admin.close()
+  }
 })

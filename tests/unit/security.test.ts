@@ -45,7 +45,7 @@ describe('GET /api/auth/google/start', () => {
     const res = await app.request(`/api/auth/google/start?redirect=${encodeURIComponent(redirect)}`, {}, google)
     expect(res.status).toBe(302)
     const cookie = /oauth_state=([^;]*)/.exec(res.headers.get('set-cookie') ?? '')?.[1] ?? ''
-    return decodeURIComponent(cookie).split('|')[1]
+    return decodeURIComponent(cookie).split('|').slice(3).join('|')
   }
 
   it('站外 redirect 存成 /dashboard，站内地址原样保留', async () => {

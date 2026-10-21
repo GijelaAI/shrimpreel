@@ -2,6 +2,7 @@ import { createRouter } from '@tanstack/react-router'
 import { getGlobalStartContext } from '@tanstack/react-start'
 import { loadContent, localeFromPathname } from './lib/i18n'
 import { routeTree } from './routeTree.gen'
+import type { ShareView } from './server/shares'
 
 // 浏览器首屏：尽早开始下载当前语言的文案，和路由 chunk 并行（见 lib/i18n.ts）
 const initialContent = typeof window === 'undefined' ? null : loadContent(localeFromPathname(window.location.pathname))
@@ -25,6 +26,7 @@ export function getRouter() {
 declare module '@tanstack/react-router' {
   interface Register {
     router: ReturnType<typeof getRouter>
-    server: { requestContext: { nonce: string } }
+    // share：分享页 /v/<id> 的数据，src/server.ts 渲染前查好（见 routes/{-$locale}/v.$shareId.tsx）
+    server: { requestContext: { nonce: string; share?: ShareView } }
   }
 }

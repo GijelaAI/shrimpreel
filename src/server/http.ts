@@ -67,6 +67,7 @@ export function publicGeneration(g: GenerationRow) {
     expired: Boolean(g.expired_at),
     removed: Boolean(g.removed_at),
     expiresAt: g.output_r2_key ? outputExpiresAt(g.completed_at) : null,
+    shareId: g.share_id,
   }
 }
 

@@ -43,6 +43,7 @@
 | `YIR_API_KEY` | `VIDEO_PROVIDER=yir` | 可选 secret，类型声明在 `src/env.d.ts`。建议在 yir Console 给这个 Key 设月度额度，见 README 的“视频服务商” |
 | `OPENAI_API_KEY` | `MODERATION_PROVIDER=openai` | 可选 secret，类型声明在 `src/env.d.ts` |
 | `TURNSTILE_SECRET_KEY` | 配了 `TURNSTILE_SITE_KEY` | 同上 |
+| `PAYMENT_NOTIFY_WEBHOOK_URL` | 可选 | 每笔订单首次入账（含后台补单）时往聊天群发一条付款消息：金额、套餐、积分、来源和订单号。按域名识别：Telegram 填 `https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>`；飞书 / Lark 填自定义机器人地址（不要开“签名校验”，可以用关键词“新付款”）；Discord 填频道 webhook；其他地址（如 Slack Incoming Webhook）发 `{"text": ...}`。发送失败只记日志，不影响入账。地址里带 token，所以放 secret。可选 secret，类型声明在 `src/env.d.ts` |
 
 切换支付商后，只要旧支付商还有订单可能退款或需要查单，就保留它的 secret。
 
@@ -52,7 +53,8 @@
 - `packages`：积分包。`id` 要在 `*_PRODUCTS` 里有对应的商品，页面上的价格要和支付商后台一致。
 - `subscriptionsEnabled`、`plans`：订阅开关和套餐（`interval` 为 `month` 或 `year`，`credits` 是每月发放量）。套餐同样要在 `*_PRODUCTS` 里有商品；不卖订阅时把开关设为 `false`。用法见 [subscriptions.md](subscriptions.md)，入账规则见 [payments.md](payments.md) 的“订阅”。
 - `video`：模型、源视频帧率和每视频秒的成本，用于估算毛利。
-- `analytics.ga4Id`、`analytics.cfBeaconToken`：统计。只有填了 `ga4Id` 才会显示 Cookie 同意横幅。
+- `analytics.ga4Id`、`analytics.cfBeaconToken`：统计。只有填了 `ga4Id` 才会显示 Cookie 同意横幅，此时归因 Cookie `vt_attr` 也等访客同意后才写入。
+- `share.enabled`：成片公开分享页，默认开启。换脸、真人类站点风险高时设为 `false`，个人中心的分享按钮和 `/v/<id>` 页面都不出现。
 - `seo.googleVerification`、`seo.bingVerification`、`seo.indexNowKey`：站长验证和 IndexNow。用 `new-site.mjs` 派生新站时会被清空。
 
 ## 仅脚本和测试使用的变量

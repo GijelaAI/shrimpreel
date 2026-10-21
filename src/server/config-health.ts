@@ -148,6 +148,17 @@ export function checkConfig(input: ConfigInput): ConfigIssue[] {
   if (vars('TURNSTILE_SITE_KEY')) requireSecrets(['TURNSTILE_SECRET_KEY'], 'Turnstile')
   else warn('TURNSTILE_SITE_KEY', 'TURNSTILE_SITE_KEY 为空：留言和举报表单没有人机校验，只靠限流')
 
+  // 付款即时通知（可选）：只检查格式，不输出地址（里面带 token）
+  const chat = input.secrets.PAYMENT_NOTIFY_WEBHOOK_URL
+  if (typeof chat === 'string' && text(chat)) {
+    const chatHost = hostOf(text(chat))
+    if (!chatHost || !text(chat).startsWith('https://')) {
+      warn('PAYMENT_NOTIFY_WEBHOOK_URL', 'PAYMENT_NOTIFY_WEBHOOK_URL 不是 https 地址：付款通知发不出去')
+    } else if (chatHost === 'api.telegram.org' && !/[?&]chat_id=[^&]/.test(text(chat))) {
+      warn('PAYMENT_NOTIFY_WEBHOOK_URL', 'PAYMENT_NOTIFY_WEBHOOK_URL 是 Telegram 地址但没带 chat_id：付款通知发不出去')
+    }
+  }
+
   const admins = vars('ADMIN_EMAILS')
     .split(',')
     .map((email) => email.trim().toLowerCase())

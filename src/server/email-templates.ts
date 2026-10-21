@@ -116,6 +116,12 @@ const ALERTS_ZH: Record<AlertKind, (p: AlertParams) => { title: string; summary:
     hint: '如果是发件域名或配额问题，这封告警本身也可能发不出去，请同时查看 Workers 日志。修复后可在后台“邮件”页重发。',
     path: '/admin/emails',
   }),
+  backup_failed: (p) => ({
+    title: 'D1 每日备份失败',
+    summary: `今天的数据库备份连续 ${p.count} 次失败，今天不再重试：${p.detail ?? ''}`,
+    hint: '在 Workers 日志里搜索 "d1 backup failed"。数据库过大导致超时或超内存时，改用 wrangler d1 export 手动导出；D1 Time Travel 仍可恢复 30 天内的任意时刻。',
+    path: '/admin',
+  }),
 }
 
 const USER_TEMPLATES: { [K in UserTemplate]: Record<Locale, Render<K>> } = {

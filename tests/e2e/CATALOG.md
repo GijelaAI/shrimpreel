@@ -161,6 +161,10 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
   - 导出包含账户、订单、流水、上传、生成、留言、举报和邮件；不含他人的订单、举报和邮箱，也不含 R2 路径、`provider_request_id`、邮件参数等内部字段；响应头为 `private, no-store`；注销后返回 401。
 - `email.spec.ts` › `留言只提醒管理员、不给留言人发信；注销账号清掉该用户的发件记录`
   - 注销账号后发件记录被清除；不给留言人发信，避免被用来给任意地址发邮件。
+- `share.spec.ts` › `公开分享：个人中心开启 → 匿名访客看到 noindex 的分享页和 AI 标识 → 他人无权操作 → 停止分享后旧链接 404，到期后 410`
+  - 分享页响应头和 meta 都是 noindex，HTML 不含 generation id；视频支持 Range（206），`/zh` 前缀可用；举报入口把分享链接预填进举报表单；他人开启或停止分享返回 404；停止分享后旧链接和媒体 404，重新分享得到新链接；封面不是 JPEG 返回 415、审核不通过返回 422 `share_rejected`；成片到期后页面和封面 410，不能再分享（410 `media_expired`）。
+- `share.spec.ts` › `分享链接被举报：凭分享链接即可定位视频，下架后分享页和媒体 410`
+  - 举报只给带 `/zh` 前缀的分享链接，管理员下架时不传视频 ID 也能定位；下架后页面、视频、封面都是 410，`/api/shares/:id` 的状态为 `removed`。
 
 ## P0 主路径
 
@@ -173,8 +177,8 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
 
 - `email.spec.ts` › `支付邮件：同一事件重放、换事件 ID 重复回调都只发一封，用下单时的语言`
 - `email.spec.ts` › `生成邮件：成功、失败退积分各一封，跟随用户最近使用的语言；重复标记失败不重发`
-- `email.spec.ts` › `举报邮件：回执 + 管理员提醒；临近截止、超时各提醒一次；下架后通知举报人和作者，不再提醒`
-  - 截止前 12 小时和超时各提醒一次，同一阶段重复执行 Cron 不重发；下架后举报人和作者各收一封，之后不再提醒；已发送的邮件不能重发（409）。
+- `email.spec.ts` › `举报邮件：未登录举报不发回执，只提醒管理员；临近截止、超时各提醒一次；下架后通知举报人和作者，不再提醒；登录用户填本人邮箱才收回执`
+  - 未登录举报填的邮箱收不到回执（表单不能被用来给任意地址发信）；截止前 12 小时和超时各提醒一次，同一阶段重复执行 Cron 不重发；下架后举报人和作者各收一封，之后不再提醒；已发送的邮件不能重发（409）；登录用户填本人邮箱（忽略大小写）收回执，填别人的邮箱不发。
 - `email.spec.ts` › `留言只提醒管理员、不给留言人发信；注销账号清掉该用户的发件记录`
 
 ## P1 告警与错误上报
@@ -208,7 +212,8 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
 - `data-management.spec.ts` › `后台订单详情：搜索进入、金额校验失败可重试、部分退款与补单后时间线完整`
 - `data-management.spec.ts` › `后台用户：付费 / 封禁筛选、按积分排序、详情汇总与审计`
 - `data-management.spec.ts` › `积分明细超过一页：加载更多后条目完整且不重复`
-- `payments.spec.ts` › `未登录回到结果页：提示登录，不无限转圈；支付商回跳带的邮箱从地址栏移除`
+- `payments.spec.ts` › `未登录回到结果页：提示登录，不无限转圈；支付商回跳带的邮箱在渲染前就被 302 去掉`
+  - 带 `email`、`status` 等参数的结果页（含 `/zh/` 前缀）先 302 到只带 `order` 的地址，响应 `Referrer-Policy: no-referrer`；`order` 里的特殊字符保持编码。
 - `settings.spec.ts` › `全站公告按语言显示，提交时压成一行；清空后不显示`
 - `settings.spec.ts` › `后台运营设置页：只提交改动项、显示修改人、恢复默认；测试连接逐项给出结果并记审计`
   - 确认框列出改动前后值；保存后显示修改人，恢复默认后显示“使用默认值”；本地 6 项测试连接都是“正常”，发信项给管理员发了测试邮件，每次测试记一条 `probe.run` 审计。
@@ -253,7 +258,10 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
 - 第三方校验：Turnstile 的启用与失败分支，OpenAI 审核接口异常时拒绝（fail closed）（`compliance.test.ts`）。
 - 发信重试：临时错误退避、永久错误不重试，邮件头注入（`email.test.ts`）。
 - 生产开关：生产和预发拒绝 mock（`providers.test.ts`）、弱 `SESSION_SECRET`（`security.test.ts`）、上线配置与 doctor（`config-health.test.ts`）、预发配置与 robots（`staging.test.ts`）。
-- 其他：告警阈值与时间桶（`alerts.test.ts`）、归因解析与 CSV 公式注入（`attribution.test.ts`）、GA4 同意与撤回（`consent.test.ts`）、错误与 CSP 报告的脱敏（`client-error.test.ts`、`csp.test.ts`）。
+- 登录：Google 授权码流程的 PKCE 与 nonce、One Tap 的 nonce（`google.test.ts`）；账号以 Google `sub` 为准、注销过的邮箱重新注册不发赠送（`auth.test.ts`）。
+- 成片下载：服务商返回的成片超过大小上限时不写 R2，没有 Content-Length 时边读边计数（`output-download.test.ts`）。
+- 运维：D1 导出的 SQL 转义与备份文件命名（`backup.test.ts`）；付款即时通知按 webhook 地址识别 Telegram、飞书、Discord，报错里不带地址（`chat-notify.test.ts`）。
+- 其他：告警阈值与时间桶（`alerts.test.ts`）、归因解析与 CSV 公式注入（`attribution.test.ts`）、归因 Cookie 在同意后才写入、拒绝时删除（`attribution-consent.test.ts`）、GA4 同意与撤回（`consent.test.ts`）、错误与 CSP 报告的脱敏（`client-error.test.ts`、`csp.test.ts`）。
 
 ## 未覆盖
 
@@ -263,7 +271,7 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
 | 真实支付商的订阅续费、扣款失败，Dodo 的取消与撤销 | test 模式触发不了续费和扣款失败（要等一个计费周期）；Dodo 的取消要 API 密钥有 Subscriptions 写入，模板的 test 密钥还没有 | 首付、激活、当月积分、门户和 Waffo 的取消由 sandbox 订阅用例覆盖（2026-10-21 手动跑过）；续费和扣款失败有按文档构造的映射单元测试，e2e 用 mock 订阅事件走同一套入账逻辑 | 补上密钥权限后重跑 Dodo 订阅用例；第一个热词站上线后观察第一次真实续费 |
 | 真实视频生成和 `/api/webhooks/fal`、`/api/webhooks/yir` 的成功回调 | 需要 `FAL_KEY` 或 `YIR_API_KEY`，每次调用要付费；e2e 用 mock 服务商，靠轮询完成 | yir 的提交、查询、错误映射和实际成本有 provider 契约单元测试（`yir.test.ts`，按 yir 文档构造响应）；smoke 巡检检查未签名回调返回 401 | 第一个热词站选定服务商后用真实 key 跑一单 |
 | 真实发信与投递 | 本地 `send_email` binding 只模拟发送 | e2e 断言发件箱记录；单元测试覆盖渲染和重试 | 线上验证随第一个热词站 |
-| Google OAuth 与 One Tap 登录 | 需要真实 Google 账号，e2e 用 dev 登录 | 单元测试覆盖 `/api/auth/google/start` 的跳转校验 | 线上验证随第一个热词站 |
+| Google OAuth 与 One Tap 登录 | 需要真实 Google 账号，e2e 用 dev 登录 | 单元测试覆盖跳转校验、PKCE、nonce 和按 `sub` 绑定 | 线上验证随第一个热词站 |
 | Turnstile 浏览器端校验 | 需要真实站点密钥 | 服务端校验的单元测试 | 线上验证 |
 | OpenAI 图片审核的真实调用 | 需要 `OPENAI_API_KEY` | e2e 用 mock 拒绝；单元测试覆盖响应解析和失败时拒绝 | 线上验证 |
 | 运营参数在线上的生效延迟 | 本地 KV 没有边缘缓存，保存后立即生效；线上 `cacheTtl` 60 秒的实际表现要在部署后看 | 保存时直接刷新 KV；单元测试覆盖缓存读写 | 线上验证随第一个热词站 |
@@ -271,6 +279,9 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
 | 限流（`UPLOAD_LIMITER`、`GENERATE_LIMITER`、`AUTH_LIMITER`） | 要在 60 秒内打满额度；本地 binding 的计数是否和线上一致没有核实过 | 无 | 线上手工验证 |
 | Queues 真实重试与死信、Cron 真实触发 | 真实死信要重试 10 次（约 35 分钟） | 用 `/api/dev/dead-letter`、`/api/dev/sweep`、`/api/dev/health-check` 等模拟 | 无 |
 | 支付争议与拒付 | test 模式无法触发 | 不认识的事件记为 ignored（单元测试） | 遇到时再补 |
-| Cookie 同意横幅 | 模板没有填 `ga4Id`，横幅不显示 | `consent.test.ts` | 热词站填了 `ga4Id` 后手工检查 |
+| Cookie 同意横幅 | 模板没有填 `ga4Id`，横幅不显示 | `consent.test.ts`；归因 Cookie 的同意逻辑由 `attribution-consent.test.ts` 覆盖 | 热词站填了 `ga4Id` 后手工检查 |
+| 分享封面截帧和社交平台预览 | Playwright 的 Chromium 不带 H.264 解码，截帧返回 null，e2e 改为直接上传 fixture 照片；社交平台抓取需要公网地址 | 服务端封面校验（长度、JPEG、审核）由 `share.spec.ts` 覆盖；截帧失败时分享页回落到站点默认 OG 图 | 热词站上线后在 Chrome、Safari 各分享一次，用平台的链接调试工具检查预览 |
+| D1 备份的线上 Cron 与恢复 | 模板不部署；本地只能用 `/api/dev/backup` 触发 | `backup.test.ts`；本地做过一次导出 → `scripts/restore-d1.mjs` 恢复的往返核对 | 热词站上线后确认 R2 每天有新文件，按 README 演练一次恢复 |
+| 付款即时通知的真实发送 | 需要真实的 Telegram、飞书或 Discord webhook | `chat-notify.test.ts` 按各平台文档构造请求 | 热词站配置 webhook 后付一单测试款 |
 | 移动端视口、Firefox 和 Safari | 只跑 Desktop Chrome，控制运行时间 | 无 | 按需加 project |
 | 线上真实域名巡检 | 模板不部署 | smoke 巡检已在本地生产模式跑通 | 第一个热词站上线后执行 |

@@ -33,6 +33,12 @@ function ReportPage() {
     if (user) setForm((f) => (f.email ? f : { ...f, email: user.email }))
   }, [user])
 
+  // 从分享页“举报这条视频”进来时带着链接（?content=），预先填好
+  useEffect(() => {
+    const content = new URLSearchParams(window.location.search).get('content')?.slice(0, 500)
+    if (content) setForm((f) => (f.contentRef ? f : { ...f, contentRef: content }))
+  }, [])
+
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: value }))
   }

@@ -35,15 +35,6 @@ function CheckoutSuccessPage() {
   const [slow, setSlow] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 支付商回跳会在 URL 上附带 email 等参数：只保留 order，避免邮箱留在地址栏、浏览器历史和后续统计里
-  useEffect(() => {
-    const url = new URL(window.location.href)
-    const extra = [...url.searchParams.keys()].filter((key) => key !== 'order')
-    if (!extra.length) return
-    for (const key of extra) url.searchParams.delete(key)
-    window.history.replaceState(window.history.state, '', url)
-  }, [])
-
   // webhook 可能比用户跳回来晚，轮询直到订单进入终态
   useEffect(() => {
     if (!orderId || !user) return

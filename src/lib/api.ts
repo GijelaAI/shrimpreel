@@ -13,17 +13,22 @@ type Options = {
   method?: 'GET' | 'POST' | 'DELETE'
   json?: unknown
   form?: FormData
+  // 原样作为请求体发送（如分享封面 JPEG），Content-Type 取 blob.type
+  blob?: Blob
   signal?: AbortSignal
 }
 
 export async function api<T>(path: string, options: Options = {}): Promise<T> {
   const init: RequestInit = {
-    method: options.method ?? (options.json !== undefined || options.form ? 'POST' : 'GET'),
+    method: options.method ?? (options.json !== undefined || options.form || options.blob ? 'POST' : 'GET'),
     credentials: 'same-origin',
     signal: options.signal,
   }
   if (options.form) init.body = options.form
-  else if (options.json !== undefined) {
+  else if (options.blob) {
+    init.body = options.blob
+    init.headers = { 'Content-Type': options.blob.type }
+  } else if (options.json !== undefined) {
     init.body = JSON.stringify(options.json)
     init.headers = { 'Content-Type': 'application/json' }
   }
@@ -75,6 +80,8 @@ export type Generation = {
   expired: boolean
   removed: boolean
   expiresAt: string | null
+  // 公开分享链接 /v/<shareId>，未分享时为 null
+  shareId: string | null
 }
 
 export type Order = {

@@ -6,8 +6,9 @@ import { safeRedirectPath } from '#/lib/redirect'
 import { exportFileName, exportUserData } from './account-export'
 import { adminRoutes } from './admin'
 import { runHealthCheck } from './alerts'
+import { backupDatabase } from './backup'
 import { classifyTouch, deviceFromUserAgent, requestAttribution, sanitizeTouch } from './attribution'
-import { endSession, loadSessionUser, publicUser, startSession, upsertUser } from './auth'
+import { deletedEmailHash, endSession, loadSessionUser, publicUser, startSession, upsertUser } from './auth'
 import { CLIENT_ERROR_PATH, summarizeClientError } from './client-error'
 import { clawbackStatements, expireStatements, ledgerStatements } from './credits'
 import { CSP_REPORT_PATH, summarizeCspReports } from './csp'
@@ -22,6 +23,7 @@ import { normalizeCode, redeemCode } from './redeem'
 import { REFERRAL_COOKIE, ensureReferralCode, normalizeReferralCode, referralSummary, requestReferral } from './referrals'
 import { assertOpen, dailyCapGuard, generationsToday, getSettings, publicNotice, referralActive } from './settings'
 import { seoRoutes } from './seo'
+import { assertShareable, findSharedGeneration, loadShare, readSharePoster, startShare, stopShare } from './shares'
 import { notifyContactMessage, runTakedownReminders } from './notifications'
 import { normalizeDodoEvent, verifyDodoWebhook } from './payments/dodo'
 import { getOrderProvider, getPaymentProvider, mockPaidKey } from './payments'
@@ -41,7 +43,7 @@ import {
 import { createTakedown, isBlockedMedia, parseTakedown, type TakedownInput } from './takedown'
 import { turnstileSiteKey, verifyTurnstile } from './turnstile'
 import type { AppContext, GenerationRow, OrderRow, UploadRow, UserRow } from './types'
-import { ApiError, constantTimeEqual, createId, isCheckConstraintError, isProduction, nowIso, sha256Hex } from './util'
+import { ApiError, constantTimeEqual, createId, isCheckConstraintError, isProduction, nowIso, randomToken, sha256Hex } from './util'
 import { activeVideoProviderId } from './video'
 
 const MAX_ACTIVE_JOBS_PER_USER = 3
@@ -121,12 +123,15 @@ app.get('/api/me', async (c) => {
 
 // ---------- Auth ----------
 
+const ONE_TAP_NONCE_COOKIE = 'g_nonce'
+
 app.get('/api/auth/google/start', async (c) => {
   await rateLimit(c.env.AUTH_LIMITER, c.req.header('cf-connecting-ip') ?? 'local')
   const config = googleOAuthConfig(c.env, new URL(c.req.url).origin)
   if (!config) throw new ApiError(503, 'google_not_configured')
-  const { url, state } = googleAuthRedirect(config)
-  setCookie(c, 'oauth_state', `${state}|${safeRedirectPath(c.req.query('redirect'), '/dashboard')}`, {
+  const { url, state, verifier, nonce } = await googleAuthRedirect(config)
+  // 回跳地址放最后：它可能含 |
+  setCookie(c, 'oauth_state', `${state}|${verifier}|${nonce}|${safeRedirectPath(c.req.query('redirect'), '/dashboard')}`, {
     httpOnly: true,
     secure: isProduction(c.env),
     sameSite: 'Lax',
@@ -137,15 +142,18 @@ app.get('/api/auth/google/start', async (c) => {
 })
 
 app.get('/api/auth/google/callback', async (c) => {
-  const [expectedState, redirectTo] = (getCookie(c, 'oauth_state') ?? '').split('|')
+  const [expectedState, verifier, nonce, ...rest] = (getCookie(c, 'oauth_state') ?? '').split('|')
+  const redirectTo = rest.join('|')
   deleteCookie(c, 'oauth_state', { path: '/api/auth/google' })
   const state = c.req.query('state') ?? ''
   const code = c.req.query('code')
-  if (!expectedState || !code || !constantTimeEqual(state, expectedState)) return c.redirect('/sign-in?error=oauth_state')
+  if (!expectedState || !verifier || !nonce || !code || !constantTimeEqual(state, expectedState)) {
+    return c.redirect('/sign-in?error=oauth_state')
+  }
   const config = googleOAuthConfig(c.env, new URL(c.req.url).origin)
   if (!config) throw new ApiError(503, 'google_not_configured')
   try {
-    const profile = await exchangeGoogleCode(code, config)
+    const profile = await exchangeGoogleCode(code, config, { verifier, nonce })
     const user = await upsertUser(c.env, {
       email: profile.email,
       name: profile.name,
@@ -165,13 +173,30 @@ app.get('/api/auth/google/callback', async (c) => {
   return c.redirect(safeRedirectPath(redirectTo, '/dashboard'))
 })
 
+// One Tap 初始化前先取 nonce：同一个值存进只发往登录接口的 cookie，Google 签进 id_token，提交时两者必须一致
+app.get('/api/auth/google/nonce', (c) => {
+  if (!googleClientId(c.env)) throw new ApiError(503, 'google_not_configured')
+  const nonce = randomToken(18)
+  setCookie(c, ONE_TAP_NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    secure: isProduction(c.env),
+    sameSite: 'Strict',
+    path: '/api/auth/google',
+    maxAge: 600,
+  })
+  c.header('Cache-Control', 'no-store')
+  return c.json({ nonce })
+})
+
 app.post('/api/auth/google/one-tap', async (c) => {
   await rateLimit(c.env.AUTH_LIMITER, c.req.header('cf-connecting-ip') ?? 'local')
   const clientId = googleClientId(c.env)
   if (!clientId) throw new ApiError(503, 'google_not_configured')
   const { credential } = await readJson<{ credential: string }>(c)
   if (!credential) throw new ApiError(400, 'missing_credential')
-  const profile = await verifyGoogleIdToken(credential, clientId)
+  const nonce = getCookie(c, ONE_TAP_NONCE_COOKIE) ?? ''
+  deleteCookie(c, ONE_TAP_NONCE_COOKIE, { path: '/api/auth/google', secure: isProduction(c.env) })
+  const profile = await verifyGoogleIdToken(credential, clientId, nonce)
   const user = await upsertUser(c.env, {
     email: profile.email,
     name: profile.name,
@@ -215,8 +240,10 @@ app.post('/api/auth/logout', async (c) => {
 app.post('/api/uploads', async (c) => {
   const user = requireUser(c)
   await rateLimit(c.env.UPLOAD_LIMITER, user.id)
-  const declared = Number(c.req.header('content-length') ?? '0')
-  if (declared > site.upload.maxBytes + 64 * 1024) throw new ApiError(413, 'file_too_large')
+  // 没有 Content-Length（分块上传）时 formData() 会把整个请求体读进内存，直接拒绝；浏览器上传表单总会带长度
+  const header = c.req.header('content-length')
+  if (!header || !/^\d+$/.test(header)) throw new ApiError(411, 'length_required')
+  if (Number(header) > site.upload.maxBytes + 64 * 1024) throw new ApiError(413, 'file_too_large')
   const form = await c.req.raw.formData().catch(() => null)
   const file = form?.get('file')
   if (!file || typeof file === 'string') throw new ApiError(400, 'missing_file')
@@ -356,9 +383,31 @@ app.get('/api/generations/:id/video', async (c) => {
 app.delete('/api/generations/:id', async (c) => {
   const row = await ownGeneration(c, c.req.param('id'))
   if (row.status === 'queued' || row.status === 'processing') throw new ApiError(409, 'generation_in_progress')
-  if (row.output_r2_key) await c.env.MEDIA.delete(row.output_r2_key)
+  const keys = [row.output_r2_key, row.share_poster_key].filter((key): key is string => Boolean(key))
+  if (keys.length) await c.env.MEDIA.delete(keys)
   await c.env.DB.prepare('DELETE FROM generations WHERE id = ?').bind(row.id).run()
   return c.json({ ok: true })
+})
+
+// 公开分享：请求体可带一张 JPEG 封面（浏览器截帧生成，Content-Type: image/jpeg），没有就用站点默认 OG 图
+app.post('/api/generations/:id/share', async (c) => {
+  const row = await ownGeneration(c, c.req.param('id'))
+  assertShareable(row)
+  if (c.req.header('content-length') !== '0') await rateLimit(c.env.UPLOAD_LIMITER, row.user_id)
+  const poster = await readSharePoster(c.env, c.req.raw)
+  return c.json({ shareId: await startShare(c.env, row, poster) })
+})
+
+app.delete('/api/generations/:id/share', async (c) => {
+  const row = await ownGeneration(c, c.req.param('id'))
+  if (row.share_id) await stopShare(c.env, row)
+  return c.json({ ok: true })
+})
+
+// 分享页在浏览器内跳转（切换语言等）时取数据；首屏由 src/server.ts 在服务端查好
+app.get('/api/shares/:shareId', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  return c.json({ share: await loadShare(c.env, c.req.param('shareId')) })
 })
 
 // ---------- Credits & billing ----------
@@ -822,6 +871,9 @@ app.delete('/api/account', async (c) => {
         `UPDATE users SET email = ?, name = NULL, avatar_url = NULL, google_sub = NULL, status = 'deleted' WHERE id = ?`,
       )
       .bind(`deleted+${user.id}@deleted.invalid`, user.id),
+    db
+      .prepare('INSERT OR IGNORE INTO deleted_accounts (email_hash, deleted_at) VALUES (?, ?)')
+      .bind(await deletedEmailHash(c.env, user.email), nowIso()),
   ])
   await endSession(c)
   await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id).run()
@@ -927,6 +979,12 @@ app.post('/api/dev/health-check', async (c) => {
   return c.json(await runHealthCheck(c.env, { since }))
 })
 
+// 本地 e2e：立即导出一次 D1 备份（覆盖当天的），返回表数、行数和大小
+app.post('/api/dev/backup', async (c) => {
+  if (!isLocalDevRequest(c)) throw new ApiError(404, 'not_found')
+  return c.json(await backupDatabase(c.env))
+})
+
 // ---------- Admin ----------
 
 app.route('/api/admin', adminRoutes)
@@ -952,6 +1010,19 @@ app.get('/media/uploads/:id', async (c) => {
   const upload = await c.env.DB.prepare('SELECT * FROM uploads WHERE id = ?').bind(id).first<UploadRow>()
   if (!upload || upload.expired_at) return c.notFound()
   return serveR2Object(c.env.MEDIA, upload.r2_key, c.req.raw, { cacheControl: 'private, max-age=600' })
+})
+
+// 公开分享的成片和封面：每次都查库，停止分享、下架、到期后立即失效（缓存只给 5 分钟）
+app.get('/media/shares/:shareId/:file{video|poster\\.jpg}', async (c) => {
+  const row = await findSharedGeneration(c.env, c.req.param('shareId'))
+  c.header('X-Robots-Tag', 'noindex')
+  if (!row) return c.text('Not found', 404)
+  if (row.removed_at || row.expired_at || row.status !== 'succeeded' || !row.output_r2_key) return c.text('Gone', 410)
+  const key = c.req.param('file') === 'video' ? row.output_r2_key : row.share_poster_key
+  if (!key) return c.text('Not found', 404)
+  const response = await serveR2Object(c.env.MEDIA, key, c.req.raw, { cacheControl: 'public, max-age=300' })
+  response.headers.set('X-Robots-Tag', 'noindex')
+  return response
 })
 
 // 记住用户最近使用的界面语言，交易邮件按它选择语言

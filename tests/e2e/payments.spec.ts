@@ -154,7 +154,17 @@ test('支付失败：结果页显示失败，订单 failed，余额不变', asyn
   expect(await credits(page.request)).toBe(0)
 })
 
-test('未登录回到结果页：提示登录，不无限转圈；支付商回跳带的邮箱从地址栏移除', async ({ page }) => {
+test('未登录回到结果页：提示登录，不无限转圈；支付商回跳带的邮箱在渲染前就被 302 去掉', async ({ page }) => {
+  // 服务端先 302（页面、统计和浏览器历史都拿不到邮箱）；带语言前缀的结果页同样处理
+  for (const [from, to] of [
+    ['/checkout/success?email=buyer%40example.com&order=ord_signed_out&status=succeeded', '/checkout/success?order=ord_signed_out'],
+    ['/zh/checkout/success?order=ord_a%26b&email=buyer%40example.com', '/zh/checkout/success?order=ord_a%26b'],
+  ]) {
+    const res = await page.request.get(from!, { maxRedirects: 0 })
+    expect(res.status()).toBe(302)
+    expect(res.headers()['location']).toBe(to)
+    expect(res.headers()['referrer-policy']).toBe('no-referrer')
+  }
   await page.goto('/checkout/success?order=ord_signed_out&email=buyer%40example.com&status=succeeded')
   await expect(page.getByTestId('checkout-result')).toContainText('Please sign in to continue.')
   await expect(page).toHaveURL(/\/checkout\/success\?order=ord_signed_out$/)

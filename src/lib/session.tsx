@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api, type ClientConfig, type PublicUser } from './api'
+import { api, errorCode, type ClientConfig, type PublicUser } from './api'
+import { site } from '#/config/site'
 import { captureAttribution, track } from './attribution'
 
 type SessionState = {
@@ -36,7 +37,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    captureAttribution()
+    captureAttribution(!!site.analytics.ga4Id)
     void refresh()
   }, [refresh])
 
@@ -87,11 +88,16 @@ function GoogleOneTap({ clientId, onSignedIn }: { clientId: string; onSignedIn: 
   useEffect(() => {
     if (location.pathname.startsWith('/admin') || location.pathname.includes('sign-in')) return
     let cancelled = false
-    const start = () => {
+    let nonce: Promise<string | null> | null = null
+    const start = async () => {
       const google = (window as unknown as { google?: GoogleId }).google
       if (cancelled || !google) return
+      // 服务端签发的 nonce 同时存在 cookie 里，提交 credential 时核对，防止截获的 id_token 被重放
+      const value = await nonce
+      if (cancelled || !value) return
       google.accounts.id.initialize({
         client_id: clientId,
+        nonce: value,
         auto_select: false,
         cancel_on_tap_outside: true,
         itp_support: true,
@@ -101,21 +107,30 @@ function GoogleOneTap({ clientId, onSignedIn }: { clientId: string; onSignedIn: 
             await api('/api/auth/google/one-tap', { json: { credential } })
             await onSignedIn()
           } catch (error) {
-            console.error('one tap failed', error)
+            const code = errorCode(error)
+            // 账号问题要让用户看到原因（例如这个邮箱已绑定另一个 Google 账号），其余失败只记日志
+            if (code.startsWith('account_')) location.href = `/sign-in?error=${encodeURIComponent(code)}`
+            else console.error('one tap failed', error)
           }
         },
       })
       google.accounts.id.prompt()
     }
+    nonce = api<{ nonce: string }>('/api/auth/google/nonce')
+      .then((data) => data.nonce)
+      .catch((error) => {
+        console.error('one tap nonce failed', error)
+        return null
+      })
     const existing = document.querySelector<HTMLScriptElement>('script[data-gsi]')
     if (existing) {
-      start()
+      void start()
     } else {
       const script = document.createElement('script')
       script.src = 'https://accounts.google.com/gsi/client'
       script.async = true
       script.dataset.gsi = '1'
-      script.onload = start
+      script.onload = () => void start()
       document.head.appendChild(script)
     }
     return () => {

@@ -1,5 +1,6 @@
-import { formatPrice } from '#/config/site'
+import { formatPrice, site } from '#/config/site'
 import { adminEmails } from './auth'
+import { postChatMessage } from './chat-notify'
 import { runEmailMaintenance, sendEmails, type OutgoingEmail } from './email'
 import { outputExpiresAt } from './retention'
 import type { GenerationRow, OrderRow, TakedownRow, UserRow } from './types'
@@ -64,10 +65,24 @@ export function notifyGenerationFinished(env: Env, generationId: string) {
   })
 }
 
+// 付款即时通知的消息（发给站长，固定中文）
+export function paidChatText(order: OrderRow) {
+  const amount = formatPrice(order.paid_amount_cents ?? order.amount_cents, order.paid_currency ?? order.currency)
+  return [
+    `【${site.brandName}】新付款 ${amount}`,
+    `${order.subscription_id ? '订阅' : '积分包'} ${order.package_id} · ${order.credits} 积分`,
+    `来源 ${order.source ?? 'direct'}${order.country ? ` · ${order.country}` : ''}`,
+    `订单 ${order.id}`,
+  ].join('\n')
+}
+
+// 只在订单首次入账时调用（processPaymentEvent 返回 processed、后台补单），重放的 webhook 不会重复通知
 export function notifyOrderPaid(env: Env, orderId: string) {
   return safely('order', async () => {
     const order = await env.DB.prepare(`SELECT * FROM orders WHERE id = ? AND status = 'paid'`).bind(orderId).first<OrderRow>()
     if (!order) return
+    const webhook = env.PAYMENT_NOTIFY_WEBHOOK_URL
+    if (webhook) await safely('order chat', () => postChatMessage(webhook, paidChatText(order)))
     const user = await activeUser(env, order.user_id)
     if (!user) return
     await sendEmails(env, [
@@ -87,20 +102,26 @@ export function notifyOrderPaid(env: Env, orderId: string) {
   })
 }
 
-type NewTakedown = Pick<TakedownRow, 'id' | 'reporter_email' | 'reporter_user_id' | 'locale' | 'reason' | 'generation_id' | 'due_at'>
+type NewTakedown = Pick<TakedownRow, 'id' | 'reporter_email' | 'reporter_user_id' | 'locale' | 'reason' | 'generation_id' | 'due_at'> & {
+  receipt: boolean
+}
 
-// 举报人收回执，管理员收“新举报”
+// 举报人收回执（receipt 为 true 时），管理员收“新举报”
 export function notifyTakedownCreated(env: Env, report: NewTakedown) {
   return safely('takedown created', () =>
     sendEmails(env, [
-      {
-        key: `takedown_received:${report.id}`,
-        template: 'takedown_received',
-        to: report.reporter_email,
-        userId: report.reporter_user_id,
-        locale: report.locale,
-        params: { reportId: report.id, dueAt: report.due_at },
-      },
+      ...(report.receipt
+        ? [
+            {
+              key: `takedown_received:${report.id}`,
+              template: 'takedown_received' as const,
+              to: report.reporter_email,
+              userId: report.reporter_user_id,
+              locale: report.locale,
+              params: { reportId: report.id, dueAt: report.due_at },
+            },
+          ]
+        : []),
       ...adminAlerts(env, `admin_takedown:${report.id}:new`, () => ({
         template: 'admin_takedown',
         params: { reportId: report.id, stage: 'new', reason: report.reason, generationId: report.generation_id, dueAt: report.due_at },

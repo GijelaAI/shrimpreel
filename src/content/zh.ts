@@ -244,7 +244,7 @@ export function zh(s: S): Content {
     support: { label: '帮助与支持' },
     consent: {
       title: '统计 Cookie',
-      body: '我们希望使用 Google Analytics Cookie 了解网站的使用情况。只有你点击“接受”后才会写入，之后也可以随时在页脚“Cookie 设置”里修改。',
+      body: '我们希望使用 Google Analytics Cookie 和一个记录来源链接的第一方 Cookie，了解网站的使用情况和哪些渠道有效。只有你点击“接受”后才会写入，之后也可以随时在页脚“Cookie 设置”里修改。',
       learnMore: '隐私政策',
       accept: '接受',
       reject: '拒绝',
@@ -275,6 +275,15 @@ export function zh(s: S): Content {
       expired: '已过期并删除',
       removed: '因举报已下架',
       expiresOn: (date: string) => `保留至 ${date}`,
+      share: '分享',
+      confirmShare: '为这条视频生成公开链接吗？拿到链接的人都能观看。页面不会显示你的名字和邮箱，你可以随时停止分享。',
+      sharedNote: '拿到链接的人都能观看这条视频。',
+      openSharePage: '打开页面',
+      copyLink: '复制链接',
+      linkCopied: '已复制',
+      copyPrompt: '复制这个链接：',
+      stopSharing: '停止分享',
+      confirmStopSharing: '确定停止分享吗？当前链接会立即对所有人失效。',
     },
     billing: {
       orders: '订单',
@@ -348,7 +357,7 @@ export function zh(s: S): Content {
       dataBody: '下载一份 JSON，包含账号、订单、积分流水、上传、生成记录、留言和举报。不含视频文件，视频请在保留期内到个人中心下载。',
       dataButton: '导出我的数据',
       dangerTitle: '注销账号',
-      dangerBody: '将删除你上传的照片和生成的视频，并在所有设备退出登录。剩余积分作废；订单记录按财务要求保留。',
+      dangerBody: '将删除你上传的照片和生成的视频，并在所有设备退出登录。剩余积分作废；订单记录按财务要求保留。之后用同一邮箱重新注册，不再赠送注册积分。',
       confirmLabel: '输入 DELETE 确认',
       deleteButton: '注销我的账号',
       redeemTitle: '兑换码',
@@ -411,6 +420,19 @@ export function zh(s: S): Content {
       urgent: '如有人身处危险，请立即联系当地紧急服务。涉及儿童性虐待的内容，请同时向 NCMEC CyberTipline 或所在国家/地区的举报热线报告。',
       cybertip: 'NCMEC CyberTipline',
     },
+    share: {
+      title: `用 ${b} 制作的 AI 视频`,
+      goneTitle: `视频不可用 – ${b}`,
+      description: `观看这条 AI 生成的 ${k} 视频，用一张照片也做一条你自己的。`,
+      heading: `用 ${b} 制作`,
+      body: `这条 ${k} 视频由 AI 根据一张照片生成。上传你的照片，也能做一条自己的。`,
+      disclosure: '本视频由 AI 生成，不代表真实发生的事件。',
+      cta: '我也做一条',
+      reportPrompt: '视频未经同意使用了你的形象，或违反了我们的规则？',
+      report: '举报这条视频',
+      gone: { missing: '链接已失效', expired: '视频已过期', removed: '视频已下架' },
+      goneBody: '视频可能已被删除或已过期，也可能是作者停止了分享。',
+    },
     common: {
       loading: '加载中…',
       retry: '重试',
@@ -445,6 +467,7 @@ export function zh(s: S): Content {
       daily_limit: '今天的生成名额已满，请明天再试，本次没有扣积分。',
       rate_limited: '请求过于频繁，请稍后再试。',
       file_too_large: '文件超过 10 MB。',
+      length_required: '浏览器上传文件的方式不受支持，请换个浏览器重试。',
       unsupported_file_type: '请上传 JPG、PNG 或 WebP 图片。',
       invalid_upload: '请重新上传照片。',
       queue_unavailable: '生成队列繁忙，积分已退回，请重试。',
@@ -472,9 +495,12 @@ export function zh(s: S): Content {
       subscription_portal_unsupported: '这个订阅暂不支持在线管理付款，请联系客服。',
       subscription_cancel_unsupported: '这个订阅无法在这里取消，请联系客服。',
       media_removed: '该视频因举报已被下架。',
+      share_rejected: '这条视频没有通过内容审核，不能公开分享。',
       invalid_report: '请填写所有必填项并勾选声明。',
       not_found: '没有找到对应内容，可能不属于当前账号。',
       internal_error: '发生意外错误，请重试。',
+      account_disabled: `该账号已被停用。如有疑问，请发邮件至 ${s.supportEmail}。`,
+      account_conflict: `这个邮箱已绑定另一个 Google 账号。请用那个账号登录，或发邮件至 ${s.supportEmail} 联系我们。`,
     } as Record<string, string>,
     legal: {
       updated: '2026-10-21',
@@ -483,13 +509,14 @@ export function zh(s: S): Content {
         sections: [
           { h: '我们收集哪些信息', p: [`登录时，我们从 Google 获取你的姓名、邮箱和头像。制作视频时，我们保存你上传的照片和生成的视频。支付信息由支付合作方处理，${b} 不会接触你的卡号。`] },
           { h: '我们如何使用', p: ['照片仅用于生成你请求的视频。邮箱用于账户运营、发送收据和服务通知（例如视频生成完成、你提交的举报已处理）以及回复客服请求。我们不发送营销邮件。我们不出售个人数据，也不会用你的照片训练模型。'] },
-          { h: '存储与保留', p: [`文件加密存储在我们的基础设施服务商处。上传的照片${photoRetention}，生成的视频${videoRetention}；你也可以提前删除它们或注销账号。订单与支付记录按税务和财务要求保留。`] },
+          { h: '存储与保留', p: [`文件加密存储在我们的基础设施服务商处。上传的照片${photoRetention}，生成的视频${videoRetention}；你也可以提前删除它们或注销账号。订单与支付记录按税务和财务要求保留。注销账号后，我们只保留邮箱地址的单向哈希，用于防止同一邮箱重复领取注册赠送。`] },
           { h: '安全检查', p: ['照片在使用前可能经过自动内容安全分类器检查，结果只用于执行内容规则，不作他用。公开表单使用防机器人服务保护，该服务可能处理你的 IP 地址和浏览器信号。'] },
           {
             h: 'Cookie 与统计',
             p: [
               '网站使用少量运行所必需的 Cookie 和浏览器存储，例如登录会话、你选择的浅色或深色主题。',
-              '我们还会写入一个第一方 Cookie（vt_attr，保留 90 天），记录你第一次和最近一次是从哪里来到本站的，例如来源网站或推广链接。它只用于了解哪些渠道带来了注册和购买，不会提供给广告网络。',
+              '我们还会写入一个第一方 Cookie（vt_attr，保留 90 天），记录你第一次和最近一次是从哪里来到本站的，例如来源网站或推广链接。它只用于了解哪些渠道带来了注册和购买，不会提供给广告网络。' +
+                (ga4Id ? '它只在你于横幅中接受统计 Cookie 后写入，撤回同意时一并删除。' : ''),
               s.referralRewardCredits > 0
                 ? '如果你打开了好友的邀请链接，我们会写入一个 Cookie（vt_ref，最多保留 30 天，注册后即删除），用于记录这次邀请。为防止滥用邀请奖励，邀请记录里保存的是你的 IP 地址加盐后的哈希值，不保存 IP 地址本身。邀请双方都看不到对方的账户信息。'
                 : '',
@@ -500,6 +527,16 @@ export function zh(s: S): Content {
                 : '',
             ].filter(Boolean),
           },
+          ...(s.share.enabled
+            ? [
+                {
+                  h: '分享的视频',
+                  p: [
+                    '分享视频后，拿到链接的人都能观看。分享页不显示你的名字和邮箱，并要求搜索引擎不要收录。为了生成链接预览图，你的浏览器会从视频中截取一帧，我们把它和视频一起保存。停止分享或删除视频后链接失效、预览图随之删除；视频到期或因举报下架后，链接同样失效。',
+                  ],
+                },
+              ]
+            : []),
           { h: '服务提供方', p: [`我们只使用少量数据处理方：云托管、存储与邮件发送、仅为你的请求处理照片的 AI 渲染服务、内容安全分类服务，以及作为记录商户（Merchant of Record）的支付服务${ga4Id || cfBeaconToken ? '；另有上文所述的统计服务' : ''}。`] },
           { h: '你的权利', p: [`你可以随时下载或删除视频，也可以在“设置”中导出个人数据（JSON）或注销账号。其他隐私请求请发送邮件至 ${s.supportEmail}。`] },
         ],

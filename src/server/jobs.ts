@@ -11,6 +11,54 @@ import { getVideoProvider } from './video'
 import { VideoProviderError } from './video/types'
 
 const JOB_TIMEOUT_MINUTES = 45
+// 成片大小上限：带 Content-Length 时直接流式写入 R2，不占 Worker 内存；没带时只能边读边缓存，上限更低（Worker 内存 128 MB）
+export const MAX_OUTPUT_BYTES = 100 * 1024 * 1024
+export const MAX_BUFFERED_OUTPUT_BYTES = 48 * 1024 * 1024
+
+// 把服务商给的成片地址存进 R2；超过上限返回 false（调用方判失败、退积分），不把超大文件读进内存
+export async function storeOutputFromUrl(
+  env: Env,
+  url: string,
+  key: string,
+  limits = { streamed: MAX_OUTPUT_BYTES, buffered: MAX_BUFFERED_OUTPUT_BYTES },
+) {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`download output failed: HTTP ${response.status}`)
+  const httpMetadata = { contentType: 'video/mp4' }
+  const header = response.headers.get('content-length')
+  const declared = header === null ? NaN : Number(header)
+  if (Number.isSafeInteger(declared) && declared > 0) {
+    if (declared > limits.streamed) {
+      await response.body?.cancel()
+      return false
+    }
+    // 运行时保证响应体和 Content-Length 一致，R2 也只接受长度已知的流
+    await env.MEDIA.put(key, response.body, { httpMetadata })
+    return true
+  }
+  if (!response.body) throw new Error('download output failed: empty body')
+  const chunks: Uint8Array[] = []
+  let size = 0
+  const reader = response.body.getReader()
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > limits.buffered) {
+      await reader.cancel()
+      return false
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  await env.MEDIA.put(key, bytes, { httpMetadata })
+  return true
+}
 const POLL_DELAY_SECONDS: Record<string, number> = { mock: 2, fal: 20, yir: 20 }
 
 export async function enqueueJob(env: Env, message: VideoJobMessage, delaySeconds = 0) {
@@ -142,20 +190,19 @@ async function pollGeneration(env: Env, generation: GenerationRow) {
   }
 
   const outputKey = `outputs/${generation.user_id}/${generation.id}.mp4`
-  let bytes: ArrayBuffer
   if ('url' in status.output) {
-    const response = await fetch(status.output.url)
-    if (!response.ok) throw new Error(`download output failed: HTTP ${response.status}`)
-    bytes = await response.arrayBuffer()
+    if (!(await storeOutputFromUrl(env, status.output.url, outputKey))) {
+      await failGeneration(env, generation.id, 'output_too_large', 'Provider output exceeds the size limit')
+      return
+    }
   } else {
     const source = await env.MEDIA.get(status.output.r2Key)
     if (!source) {
       await failGeneration(env, generation.id, 'output_missing', `R2 object ${status.output.r2Key} not found`)
       return
     }
-    bytes = await source.arrayBuffer()
+    await env.MEDIA.put(outputKey, await source.arrayBuffer(), { httpMetadata: { contentType: 'video/mp4' } })
   }
-  await env.MEDIA.put(outputKey, bytes, { httpMetadata: { contentType: 'video/mp4' } })
   const now = nowIso()
   const costCents = status.costCents ?? provider.costCents(generation.duration_seconds)
   const saved = await env.DB.prepare(

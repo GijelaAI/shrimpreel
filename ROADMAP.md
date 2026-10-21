@@ -1,12 +1,12 @@
 # ROADMAP
 
-## 当前状态（2026-10-21）
+## 当前状态（2026-10-22）
 
 本地全部可用。模板本身不部署上线（2026-10-20 决定），线上验证随第一个热词站进行。下文提到的 `.tmp/` 工件不入库，只在作者本机。
 
 - 已验证：
-  - 检查与构建：`npm run typecheck`；`npm test`（181 个单元测试）；`npm run build`。
-  - e2e：`npm run test:e2e`（62 个用例全部通过，2026-10-21）。
+  - 检查与构建：`npm run typecheck`；`npm test`（214 个单元测试）；`npm run build`。
+  - e2e：`npm run test:e2e`（64 个用例全部通过，2026-10-22）。
   - SEO：`npm run seo:check`（20 个页面 0 error）。
   - 支付商 sandbox（2026-10-21，`SANDBOX_WEBHOOK=1`，经隧道收真实 webhook）：Dodo 付款、拒付、部分退款 3 个用例通过，订阅用例的首付、激活、积分和门户通过，取消续费因 test 密钥缺 Subscriptions 写入返回 403；Waffo 付款、拒付和订阅 3 个用例全部通过。
 - 模板全面评审（2026-10-20）中不需要产品决策的 P0/P1 已在本地完成：
@@ -101,23 +101,22 @@
   - R2 生命周期规则还没有在线上 bucket 配置。
 - 交易邮件：本地只模拟发送。还没有 Onboard 发信域名、真实发出过邮件，也没有验证垃圾箱投递率和 Gmail/Outlook 的显示效果；需要 Workers Paid。
 - Cloudflare 线上部署：D1/R2/KV/Queues/Rate Limiting/Cron 的实际绑定、自定义域名、HSTS、`robots.txt` 和 sitemap 的线上输出、Core Web Vitals。
+- 线上 D1 执行迁移 0014、0015（需要 `npm run db:migrate:remote`）。
+- 成片分享：社交平台（X、Facebook、Telegram、微信等）抓取 OG 预览；Safari 上的封面截帧（不支持 canvas `filter` 的 Safari 版本上背景不会模糊，但仍能截出封面）。
+- D1 备份：线上 Cron 每天写入 R2、30 天清理，以及 `scripts/restore-d1.mjs --remote` 恢复到新建的线上库。
+- 付款即时通知：没有往真实的 Telegram、飞书、Discord webhook 发过消息。
 
 ## 已知问题
 
-- 本地 dev 下，miniflare 5 beta 在 Worker 不读完请求体就返回时，会让同一连接上的下一个请求出错。`src/server.ts` 里的 `drainUnreadBody` 是仅 dev 生效的规避代码。升级 `@cloudflare/vite-plugin` 后可以尝试去掉，再跑 e2e 的 CSRF 用例确认。
-- e2e 偶发 `page.goto: net::ERR_ABORTED`：2026-10-20 全量跑出现过 1 次（25/27），之后的全量运行没有复现，根因未查明。已排除两个怀疑点：加载后的第二次导航来自 TanStack history 初始化时的 `replaceState`，视频请求被中止是 `preload="metadata"` 的正常行为。CI 里 Playwright 重试 1 次并保留 trace。
-- CI 固定在 `ubuntu-24.04`：`ubuntu-latest` 从 2026-10 起迁往 Ubuntu 26.04，而 Playwright 1.59 不支持它（`playwright install` 报 `does not support chromium on ubuntu26.04-x64`）。升级到支持 26.04 的 Playwright（1.64 已支持）并跑通 e2e 后，把两个 job 改回 `ubuntu-latest`。
+- 本地 dev 下，miniflare 5 beta 在 Worker 不读完请求体就返回时，会让同一连接上的下一个请求出错。`src/server.ts` 里的 `drainUnreadBody` 是仅 dev 生效的规避代码。2026-10-21 在 `@cloudflare/vite-plugin` 1.64.0（miniflare 5.20261019.0-beta）上复测仍需要：去掉后同一连接连发跨域 JSON POST，结果是 403、500 交替，恢复后全是 403。下次升级用同样的办法复测（keep-alive 连接上连发 6 个带 JSON body、`Origin` 为外站的 POST）。
+- e2e 偶发 `page.goto: net::ERR_ABORTED`：2026-10-20 全量跑出现过 1 次（25/27），之后没有复现。可能的原因已在 2026-10-21 找到并修复：Tailwind v4 默认扫描整个仓库，样式经 `?url` 引入、不能热替换，所以 e2e 运行期间改 README 或 docs 会让 dev 页面整页刷新（同一天的举报用例偶发失败就是这样复现的）。`src/styles.css` 改为 `source('.')` 只扫描 `src/`。CI 里 Playwright 仍重试 1 次并保留 trace。
 - 用隧道联调时，支付商后台的 test webhook 指向临时地址，隧道失效后要更新 URL（Dodo 用 `dodo-setup.mjs --webhook-id`）。
 - Dodo 收银台显示的商户名取自注册信息，上 live 前在 Dodo 后台改成品牌名。
-- Dodo 回跳 URL 带买家邮箱（`?email=`）。GA4 已过滤，结果页加载后也会从地址栏去掉；但 Worker 访问日志里第一次请求的 URL 仍带邮箱。
-- 安全排查中需要产品决策、暂未改动的项：
-  - 账号按邮箱合并：同一邮箱换了 Google 账号（`sub` 不同）仍会登录到原账号。Google 建议用 `sub` 而不是邮箱作为唯一标识。
+- Dodo 回跳 URL 带买家邮箱（`?email=`）。Worker 在渲染前 302 去掉，页面、GA4 和浏览器历史里都没有；但 Workers 日志里第一次请求的 URL 仍带邮箱。
+- 安全排查中暂未改动的项：
   - 邮箱移出 `ADMIN_EMAILS` 后不会自动降级，要在后台手动取消管理员（README 已写明）。
-  - 注销后用同一邮箱重新注册，可以再领一次注册赠送。
-  - Google 登录没有用 PKCE，One Tap 没有用 nonce。
-  - 举报回执发到举报人填写的邮箱，可被用来给任意地址发回执；有限流和 Turnstile。
-  - 上传请求缺少 `Content-Length` 时会整体读入内存；fal 成片下载没有大小上限。
   - `wrangler.jsonc` 默认 `APP_ENV=development`，部署时必须改成 `production`（README 部署第 5 步）。否则 Cookie 不带 Secure，mock 服务商和弱 `SESSION_SECRET` 也不会被拦截。`npm run deploy` 先跑的 `npm run doctor` 会拦下；直接 `wrangler deploy` 则不会。
+- D1 备份在 Worker 内存里拼出整库 SQL 再压缩，适合几十 MB 以内的库（本地 1.4 万行、压缩后约 0.8 MB 时正常）。数据量接近 Worker 内存上限（128 MB）前要改成按表分段写入 R2 multipart，或改用 Cloudflare 的 D1 导出 API。
 
 ## 模板增强计划（2026-10-21）
 
@@ -143,7 +142,7 @@
    - ~~#8~~ 已完成（2026-10-21）。邀请奖励（只发积分，不发现金），见下文。
    - ~~#10~~ 已完成（2026-10-21）。后台运营参数与服务商连接测试（密钥不进数据库），见下文。
    - ~~#7~~ 已完成（2026-10-21）。订阅（月付、年付），见下文。
-4. P2 按需：运维脚本、群聊付款通知、营销邮件订阅、多家统计、在线客服、`llms.txt`、协作模板、Demo 模式、RBAC、只读的“以用户身份查看”、AdSense 开关、回信转发、仅邀请注册、注册来源问卷、dependabot。
+4. P2 按需：运维脚本、~~群聊付款通知~~（已完成，见下文）、营销邮件订阅、多家统计、在线客服、`llms.txt`、协作模板、Demo 模式、RBAC、只读的“以用户身份查看”、AdSense 开关、回信转发、仅邀请注册、注册来源问卷、dependabot。
 
 **#33 yir.ai 视频服务商**（群友建议，2026-10-21 评估并接入）
 
@@ -212,12 +211,36 @@
 - 实测发现并修复：Waffo 首付事件不带周期，本站先按付款时间推算，之后状态事件给出的周期只到日期，当月积分的到期时间和当期结束对不上。现在状态事件校正周期时，和订阅的更新放进同一个 batch 对齐当期批次的到期时间（`alignSubscriptionGrantStatement`，乱序的旧事件不改），有单元测试；测试用的 D1 外壳 batch 补上每条语句的 `meta.changes`。
 - 未验证：真实续费和扣款失败（test 模式触发不了）；Dodo 的取消与撤销（补上密钥权限后重跑 `--grep 订阅`）；Dodo 订阅商品的 `subscription_period_count` 设成 10 年是否合适；线上 D1 执行迁移 0013（需要 `npm run db:migrate:remote`）。默认开启订阅和定价是产品取舍，热词站按需调整。
 
+**安全待决策项处理**（2026-10-21）
+
+- 账号以 Google `sub` 为准：同一邮箱换了 `sub` 返回 409 `account_conflict`（登录页提示联系客服），已封禁或注销的账号返回 403 `account_disabled`；dev 登录建的账号第一次 Google 登录时绑定 `sub`。
+- 迁移 `0014_deleted_accounts.sql`：注销时记录邮箱的加盐哈希（盐是 `SESSION_SECRET`），同一邮箱重新注册不发注册赠送、不绑定邀请人。设置页注销说明和隐私政策已写明。
+- Google 授权码流程加 PKCE（S256）和 nonce，cookie 里存 `state|verifier|nonce|redirect`；One Tap 先请求 `/api/auth/google/nonce`（cookie 限 `/api/auth/google`、`SameSite=Strict`、10 分钟），提交时核对 id_token 的 nonce。旧格式 cookie 按登录过期处理。
+- 举报回执只发给已登录、且填写本人账号邮箱（忽略大小写）的举报人；管理员提醒和处理结果照发。
+- 上传缺 `Content-Length` 返回 411，超限 413，都不读请求体；成片超过 100 MB 判失败退积分，没有长度时边读边计数，48 MB 停止。
+- 支付结果页带 `order` 以外的参数时 Worker 302 去掉，替代原来的前端去参数。
+- 测试：`tests/unit/auth.test.ts`、`google.test.ts`（本地 RSA 密钥签 id_token）、`output-download.test.ts`，`security.test.ts` 跟着 cookie 格式更新；e2e 的举报邮件和支付结果页用例补了断言。工件在 `.tmp/security-fixes/`。
+- 未验证：线上 Google 回调和 One Tap（要真实 client id）；上传 411 没有自动化测试（浏览器总会带长度）；线上 D1 执行迁移 0014（需要 `npm run db:migrate:remote`）。
+
+**依赖与 CI**（2026-10-21）
+
+- `@playwright/test` 升到 1.64.1（支持 Ubuntu 26.04），CI 和部署示例的 job 改回 `ubuntu-latest`。
+- `src/styles.css` 的 Tailwind 只扫描 `src/`：之前会把 README、docs 里像类名的词编进 CSS（构建产物少了约 1.3 KB），dev 下改文档还会让页面整页刷新。
+
+**成片分享、D1 备份、付款通知、归因 Cookie**（2026-10-22）
+
+- 成片分享页 `/v/<id>`：个人中心“分享”生成 16 位随机链接，可复制、停止分享（旧链接 404，重新分享换新链接）。页面显示视频、AI 标识、引导制作和举报入口，响应头和 meta 都是 noindex，不含用户信息和 generation id。封面由浏览器截一帧（1200×630 JPEG），服务端校验类型、大小并过内容审核（不通过 422 `share_rejected`），截帧失败就用站点默认 OG 图。成片到期或被下架后页面和媒体 410；举报可以只给分享链接，后台下架时自动定位视频。开关 `site.share.enabled`；迁移 `0015_shares.sql`；导出数据和隐私政策已更新。
+- D1 每日备份：Cron 每天（UTC）把整库导出成 SQL、gzip 后写到 R2 的 `backups/d1/<日期>.sql.gz`，保留 30 天；`sessions` 只导结构；每天最多试 3 次，失败发 `backup_failed` 告警。`scripts/restore-d1.mjs` 只往空库恢复（目标库非空时拒绝）。本地往返核对：导出 23 张表、1.4 万行，恢复到空库后除 `sessions` 外逐表行数和内容哈希一致，积分余额与批次剩余之和一致，迁移记录完整。
+- 付款即时通知：配置密钥 `PAYMENT_NOTIFY_WEBHOOK_URL` 后，每笔订单首次入账（含续费和后台补单）发一条消息，按地址识别 Telegram、飞书、Discord；发送失败只写日志，不影响入账，报错里不带地址。
+- `vt_attr` 归因 Cookie 改为同意后才写入：没开同意横幅时照旧；开了横幅时先暂存在页面内存，接受后写入，拒绝或撤回时删除。
+- 测试：e2e `share.spec.ts` 2 个；单元测试 `backup.test.ts`、`chat-notify.test.ts`、`attribution-consent.test.ts`。工件在 `.tmp/security-fixes/` 和 `.tmp/restore-d1/`。
+- 未验证：见上文“未验证”的分享、备份、付款通知三条。
+
 ## 下一步
 
 按上面的“模板增强计划”推进（第一、二、三批已完成，剩 P2 按需项）。其余事项按 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 的“建议顺序”推进：
 
 1. 部署第一个热词站：
-   - 上线前决定上文“已知问题”里安全相关的待定项。
    - 线上验证绑定、Google 登录、支付 test webhook，并用 fal 跑一次真实生成。
    - 运行 `npm run seo:check -- --base https://<domain> --production` 和 `/seo-audit https://<domain>`（含 Core Web Vitals）。
 2. P0 剩余项：
@@ -225,9 +248,8 @@
    - 未成年人和名人检测：OpenAI 的图片类别不覆盖这两类。
 3. P1：
    - 首单转化：首次免费生成一次带水印的短视频（依赖后处理水印），或增加低价体验包，二选一，都要配额防刷。
-   - 成片分享页和缩略图（OG 预览）。UGC 页面默认 noindex，人工挑选后再开放索引。
-   - D1 定期导出到 R2 的 Workflow（Time Travel 已覆盖 30 天内恢复，这一项用于更长留存和跨账号灾备）。上线时确认使用 Workers Paid，否则 Time Travel 只有 7 天。
+   - 分享页开放索引：目前一律 noindex，等有了人工挑选的优质成片再决定是否开放部分页面。
+   - 上线时确认使用 Workers Paid，否则 D1 Time Travel 只有 7 天。
    - 错误追踪：前端错误目前只进 Workers Logs，堆栈是压缩后的行列号；需要 source map 还原或聚合告警时换成 Sentry。
-   - `vt_attr` 归因 Cookie 不在同意横幅之后；主要面向欧盟用户时移到同意之后。
    - 订单详情页提供发票下载：Dodo 可由服务端代理 `GET /invoices/payments/{payment_id}`（返回 PDF，每条记录每分钟限 5 次），未实测；Waffo 由支付商直接给买家发收据和发票，没有找到公开的下载接口，详情页继续提示查收邮件。
 4. P2（等有数据再定）：每篇文章单独的 og 图、视频 sitemap、`apple-touch-icon` 与 web manifest、海报改 webp/avif、公开页 SSR HTML 边缘缓存、邮箱 magic link 登录、营销邮件、后台 webhook 手动重放与复购 cohort。
