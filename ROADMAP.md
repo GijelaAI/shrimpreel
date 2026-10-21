@@ -238,7 +238,8 @@
 
 **宣传视频**（2026-10-22）
 
-- `docs/media/shrimpreel-promo-{en,zh}.mp4`（72 秒，1080p，无声）和封面图，README 两份顶部嵌入。画面是本地 dev 环境的真实截图（mock 支付和 mock 视频服务商造的演示数据），示例站和素材是占位演示。
+- `docs/media/shrimpreel-promo-{en,zh}.mp4`（72 秒，1080p，无声），README 两份顶部嵌入播放器。画面是本地 dev 环境的真实截图（mock 支付和 mock 视频服务商造的演示数据），示例站和素材是占位演示。
+- README 里嵌的是 GitHub 附件链接（`user-attachments`），仓库里的 mp4 GitHub 只给下载、不能播放。重录后要把新 mp4 重新上传成附件并替换 README 两份里的链接。
 - 界面或功能有大改时重录。`docs/` 属于共用层，视频会随模板合并进各热词站仓库；站点不需要时可以删掉。
 
 ## 下一步

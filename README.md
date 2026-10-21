@@ -6,9 +6,9 @@ Built by [浅水虾 (qianshuixia)](https://x.com/qianshuixia2026).
 
 An open-source template for "one photo → an AI video that follows a viral template" SaaS sites. Every trending keyword gets its own site: create a repo from this template, change the config, copy and media, and ship. Everything runs on Cloudflare: Workers + D1 + R2 + KV + Queues + Rate Limiting + Cron Triggers.
 
-[![ShrimpReel promo video: landing page, generation, payments, share pages, admin, compliance and stack](docs/media/shrimpreel-promo-en.jpg)](docs/media/shrimpreel-promo-en.mp4)
+https://github.com/user-attachments/assets/ce92074a-2a09-4a3e-b750-4b888d12abf8
 
-[Watch the 72-second tour](docs/media/shrimpreel-promo-en.mp4) (MP4, no sound; [Chinese version](docs/media/shrimpreel-promo-zh.mp4)). Screens are from a local run; the demo site "Neon Shuffle AI" and its clips are placeholders.
+A 72-second tour, no sound ([Chinese version](https://github.com/user-attachments/assets/895aab94-d0c9-474e-8d90-61a6c551e536); MP4 files in [docs/media](docs/media)). Screens are from a local run; the demo site "Neon Shuffle AI" and its clips are placeholders.
 
 > Status: the full flow works locally (unit tests + Playwright e2e). It has not been deployed as a production site yet; [ROADMAP.md](ROADMAP.md) lists what has and hasn't been verified against real services. Code comments, ROADMAP and `docs/` are currently in Chinese.
 
