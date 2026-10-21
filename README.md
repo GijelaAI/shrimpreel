@@ -8,7 +8,7 @@ An open-source template for "one photo → an AI video that follows a viral temp
 
 https://github.com/user-attachments/assets/ce92074a-2a09-4a3e-b750-4b888d12abf8
 
-A 72-second tour, no sound ([Chinese version](https://github.com/user-attachments/assets/895aab94-d0c9-474e-8d90-61a6c551e536); MP4 files in [docs/media](docs/media)). Screens are from a local run; the demo site "Neon Shuffle AI" and its clips are placeholders.
+A 72-second tour, no sound ([Chinese version](README.zh-CN.md); MP4 files in [docs/media](docs/media)). Screens are from a local run; the demo site "Neon Shuffle AI" and its clips are placeholders.
 
 > Status: the full flow works locally (unit tests + Playwright e2e). It has not been deployed as a production site yet; [ROADMAP.md](ROADMAP.md) lists what has and hasn't been verified against real services. Code comments, ROADMAP and `docs/` are currently in Chinese.
 
