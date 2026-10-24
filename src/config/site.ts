@@ -22,22 +22,40 @@ export const site = {
   trendPlatform: 'TikTok',
   ogImage: '/og.png',
 
-  // 生成模板：provider 输出时长 = 源视频时长，所以每个时长档位各有一段剪好的源视频。
-  // 源视频上传到 R2 的 templates/<文件名>，由 /media/templates/<文件名> 公开提供给 provider 拉取。
+  // 生成模板的共用参数：provider 输出时长 = 源视频时长，所以每种风格的每个时长档位各有一段剪好的源视频（见 styles[].sources）。
   template: {
-    id: 'neon-shuffle-v1',
     aspectRatio: '9:16',
     fullSeconds: 18,
   },
 
-  // 首页展示素材（public/demo/）。换成真实素材时必须拥有授权，credit 写原作者，例如 '@handle · TikTok'。
+  // 舞蹈风格：一个站点可以配多种，第一个是默认风格；只有一种时界面不显示风格选择。
+  // 源视频上传到 R2 的 templates/<文件名>，由 /media/templates/<文件名> 公开提供给 provider 拉取。
+  // 风格的展示名和一句话介绍写在 src/content/<locale>.ts 的 styles[id]（缺了 typecheck 报错）。
+  styles: [
+    {
+      // 写入 generations.template_id，发布后不要改
+      id: 'neon-shuffle-v1',
+      // 键 = durations[].id，每个档位都要有
+      sources: { short: 'neon-shuffle-v1-6s.mp4', medium: 'neon-shuffle-v1-12s.mp4', full: 'neon-shuffle-v1-18s.mp4' },
+      // 这种风格的 prompt，覆盖 video.yir.prompt 和 video.nanoapi.prompt；null = 用默认
+      prompt: null as string | null,
+      // yir 两步走（可选）：先用图片模型把照片里的人合成进源视频首帧，再拿合成图做动作参考，成片保留源视频的场景。
+      // null = 单步，直接用用户照片做参考，背景会变成照片的背景。图片模型等共用参数在 video.yir.sceneImage
+      scene: null as StyleScene | null,
+      // 首页展示素材（public/demo/）。换成真实素材时必须拥有授权，credit 写原作者，例如 '@handle · TikTok'。
+      examples: {
+        original: { video: '/demo/original.mp4', poster: '/demo/original.jpg', credit: 'Demo clip · original' },
+        aiVersions: [
+          { video: '/demo/ai1.mp4', poster: '/demo/ai1.jpg', credit: 'Demo clip · AI render' },
+          { video: '/demo/ai2.mp4', poster: '/demo/ai2.jpg', credit: 'Demo clip · AI render' },
+        ],
+        madeWith: { photo: '/demo/sample-photo.jpg', video: '/demo/madeWith.mp4', poster: '/demo/madeWith.jpg' },
+      },
+    },
+  ],
+
+  // 全站共用的首页展示素材
   examples: {
-    original: { video: '/demo/original.mp4', poster: '/demo/original.jpg', credit: 'Demo clip · original' },
-    aiVersions: [
-      { video: '/demo/ai1.mp4', poster: '/demo/ai1.jpg', credit: 'Demo clip · AI render' },
-      { video: '/demo/ai2.mp4', poster: '/demo/ai2.jpg', credit: 'Demo clip · AI render' },
-    ],
-    madeWith: { photo: '/demo/sample-photo.jpg', video: '/demo/madeWith.mp4', poster: '/demo/madeWith.jpg' },
     // “创意”区块：每条 = 一张示例照片 + 一段成片
     ideas: [
       { photo: '/demo/sample-photo.jpg', video: '/demo/ai1.mp4', poster: '/demo/ai1.jpg' },
@@ -65,9 +83,14 @@ export const site = {
       // 用户照片会经过哪些上游渠道。null = 按 API Key 绑定的 Routing Profile 选，失败可换渠道；
       // 填渠道 ID（如 ['official'] 只走 Kling 官方）则只在这些渠道里选，全部失败时任务失败。隐私政策要写明实际经过的渠道
       routingOnly: null as readonly string[] | null,
-      // 两步走（可选）：先用图片模型把照片里的人合成进源视频首帧，再拿合成图做动作参考，成片保留源视频的场景。
-      // null = 直接用用户照片做参考，背景会变成照片的背景。字段说明见下方 YirSceneConfig
-      scene: null as YirSceneConfig | null,
+      // 两步走用的图片模型参数（共用）。哪种风格走两步由 styles[].scene 决定，字段说明见下方 YirSceneImageConfig
+      sceneImage: {
+        model: 'google/nano-banana-2',
+        resolution: '1K',
+        aspectRatio: '9:16',
+        costCents: 4,
+        routingOnly: null as readonly string[] | null,
+      } as YirSceneImageConfig,
     },
     // NanoAPI（可选，VIDEO_PROVIDER=nanoapi）：genjutsu 模型，照片 + 源视频。
     // mode：motion_control = 照片里的人做源视频的动作；replace_object = 把源视频里的对象换成照片里的，prompt 要写清换哪个。
@@ -83,9 +106,9 @@ export const site = {
   },
 
   durations: [
-    { id: 'short', seconds: 6, credits: 6, source: 'neon-shuffle-v1-6s.mp4' },
-    { id: 'medium', seconds: 12, credits: 12, source: 'neon-shuffle-v1-12s.mp4' },
-    { id: 'full', seconds: 18, credits: 18, source: 'neon-shuffle-v1-18s.mp4', isFull: true },
+    { id: 'short', seconds: 6, credits: 6 },
+    { id: 'medium', seconds: 12, credits: 12 },
+    { id: 'full', seconds: 18, credits: 18, isFull: true },
   ],
 
   // 积分包：一次性购买，买的积分永不过期（赠送积分可以设有效期，扣费时先扣快到期的）。价格用于展示与订单记录，实际收费以支付商后台为准。
@@ -177,11 +200,16 @@ export const site = {
 export type DurationOption = (typeof site.durations)[number]
 export type CreditPackage = (typeof site.packages)[number]
 
-export interface YirSceneConfig {
+// 风格的两步走参数（yir）：首帧图和合成 prompt 跟着风格走
+export interface StyleScene {
   // 源视频首帧图，放在 seed/templates/，和源视频一起上传到 R2 的 templates/。各时长档位从同一帧开始，共用一张
   frame: string
-  model: string // 图片编辑模型，如 'google/nano-banana-2'
   prompt: string // Image 1 是首帧，Image 2 是用户照片
+}
+
+// 两步走的图片模型参数，所有风格共用
+export interface YirSceneImageConfig {
+  model: string // 图片编辑模型，如 'google/nano-banana-2'
   resolution: string
   aspectRatio: string // 和源视频一致，如 '9:16'
   costCents: number // 成本估算（美分/张），只在账单还没结算时用
@@ -195,6 +223,32 @@ export interface SubscriptionPlan {
   priceCents: number // 每期价格（年付为一年的价格）
   currency: string
   highlight?: boolean
+}
+
+export interface ExampleClip {
+  video: string
+  poster: string
+  credit: string
+}
+
+export interface Style {
+  id: string
+  sources: Readonly<Record<DurationOption['id'], string>> // 键 = durations[].id，值 = seed/templates/ 里的文件名
+  prompt: string | null
+  scene: StyleScene | null
+  examples: {
+    original: ExampleClip
+    aiVersions: readonly ExampleClip[]
+    madeWith: { photo: string; video: string; poster: string }
+  }
+}
+
+export const STYLES: readonly Style[] = site.styles
+// 第一个风格是默认风格：请求不带 styleId、首页 SSR 和 SEO 都用它
+export const defaultStyle: Style = STYLES[0]!
+
+export function findStyle(id: string): Style | undefined {
+  return STYLES.find((s) => s.id === id)
 }
 
 export function findDuration(id: string) {

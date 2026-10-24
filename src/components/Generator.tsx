@@ -1,7 +1,7 @@
 import { useRouterState } from '@tanstack/react-router'
 import { CircleAlert, CircleCheck, Download, Upload } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { site } from '#/config/site'
+import { STYLES, defaultStyle, site } from '#/config/site'
 import { api, errorCode, isActiveGeneration, type Generation } from '#/lib/api'
 import { track } from '#/lib/attribution'
 import { useContent, useLocale, useLocalePath } from '#/lib/i18n'
@@ -12,7 +12,8 @@ type Photo = { file: File; previewUrl: string; uploadId: string | null }
 
 const POLL_MS = 3000
 
-export function Generator() {
+// styleId / onStyleChange：首页把风格状态提到外面，让 hero 标签和生成器同步；不传时生成器自己管
+export function Generator({ styleId: controlledStyleId, onStyleChange }: { styleId?: string; onStyleChange?: (id: string) => void } = {}) {
   const c = useContent()
   const g = c.generator
   const lp = useLocalePath()
@@ -23,6 +24,9 @@ export function Generator() {
   const [photo, setPhoto] = useState<Photo | null>(null)
   const [uploading, setUploading] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [ownStyleId, setOwnStyleId] = useState<string>(defaultStyle.id)
+  const styleId = controlledStyleId ?? ownStyleId
+  const selectStyle = onStyleChange ?? setOwnStyleId
   const [durationId, setDurationId] = useState<string>(site.durations[site.durations.length - 1]!.id)
   const [consent, setConsent] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -88,8 +92,8 @@ export function Generator() {
     try {
       const uploadId = photo.uploadId ?? (await upload(photo.file))
       if (!photo.uploadId) setPhoto({ ...photo, uploadId })
-      const data = await api<{ generation: Generation }>('/api/generations', { json: { uploadId, durationId, locale } })
-      track('generate_video', { duration_id: durationId, credits: data.generation.creditsCost })
+      const data = await api<{ generation: Generation }>('/api/generations', { json: { uploadId, durationId, styleId, locale } })
+      track('generate_video', { style_id: styleId, duration_id: durationId, credits: data.generation.creditsCost })
       setGeneration(data.generation)
       await refresh()
     } catch (err) {
@@ -176,9 +180,41 @@ export function Generator() {
         <p className="text-xs leading-5 text-muted">{g.guidance}</p>
       </section>
 
-      {/* 2. 时长 */}
+      {/* 2. 风格：只有一种风格时不显示 */}
+      {STYLES.length > 1 ? (
+        <section className="space-y-3">
+          <StepTitle n={2}>{g.stepStyle}</StepTitle>
+          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label={g.stepStyle}>
+            {STYLES.map((style) => {
+              const active = style.id === styleId
+              const copy = c.styles[style.id as keyof typeof c.styles]
+              const thumb = style.examples.aiVersions[0]
+              return (
+                <button
+                  key={style.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={busy}
+                  data-testid={`style-${style.id}`}
+                  onClick={() => selectStyle(style.id)}
+                  className={`flex items-center gap-3 rounded-xl p-2 text-left transition ${active ? 'bg-card shadow-sm ring-2 ring-ink' : 'bg-bg-soft text-muted ring-1 ring-line hover:text-fg'}`}
+                >
+                  {thumb ? <img src={thumb.poster} alt="" loading="lazy" className="aspect-[3/4] w-10 shrink-0 rounded-md object-cover" /> : null}
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-fg">{copy.name}</span>
+                    <span className="block text-xs text-muted">{copy.tagline}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {/* 时长 */}
       <section className="space-y-3">
-        <StepTitle n={2}>{g.stepLength}</StepTitle>
+        <StepTitle n={STYLES.length > 1 ? 3 : 2}>{g.stepLength}</StepTitle>
         <div className="grid grid-cols-3 gap-1 rounded-xl bg-bg-soft p-1" role="radiogroup" aria-label={g.stepLength}>
           {site.durations.map((d) => {
             const active = d.id === durationId

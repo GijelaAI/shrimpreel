@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { site } from '#/config/site'
+import { defaultStyle, site, type Style } from '#/config/site'
 import { createNanoapiProvider, nanoapiCostCents } from '#/server/video/nanoapi'
 import { VideoProviderError } from '#/server/video/types'
 
@@ -7,8 +7,12 @@ import { VideoProviderError } from '#/server/video/types'
 const env = (vars: Record<string, string> = {}) =>
   ({ APP_ENV: 'production', SITE_URL: 'https://moonhop.ai', SESSION_SECRET: 'a'.repeat(64), NANOAPI_API_KEY: 'nano_test', ...vars }) as unknown as Env
 
-const input = (webhookUrl = 'https://moonhop.ai/api/webhooks/nanoapi?gen=gen_1&token=t') => ({
+// 站点会给默认风格配自己的 prompt、scene：用例默认按风格不带 prompt 跑
+const plainStyle: Style = { ...defaultStyle, prompt: null, scene: null }
+
+const input = (webhookUrl = 'https://moonhop.ai/api/webhooks/nanoapi?gen=gen_1&token=t', style: Style = plainStyle) => ({
   generationId: 'gen_1',
+  style,
   durationSeconds: 12,
   imageUrl: 'https://moonhop.ai/media/uploads/upl_1?exp=1&sig=s',
   sourceVideoUrl: 'https://moonhop.ai/media/templates/neon-12s.mp4',
@@ -88,6 +92,10 @@ describe('nanoapi provider：提交', () => {
     nano.mode = 'replace_object'
     await provider.submit(input())
     expect(posts()[2]!.body).toMatchObject({ mode: 'replace_object', prompt: 'Replace the dancer' })
+
+    // 风格自己的 prompt 优先于站点默认
+    await provider.submit(input(undefined, { ...plainStyle, prompt: 'Swap in the second dancer' }))
+    expect(posts()[3]!.body).toMatchObject({ prompt: 'Swap in the second dancer' })
   })
 
   it('创建前已有同一个任务（图片和源视频地址都相同）：沿用它的 id，不再创建，不论状态', async () => {

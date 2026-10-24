@@ -1,5 +1,9 @@
+import type { Style } from '#/config/site'
+
 export interface VideoSubmitInput {
   generationId: string
+  // 任务所属风格：prompt、两步走的首帧都跟着风格走
+  style: Style
   durationSeconds: number
   imageUrl: string
   sourceVideoUrl: string
@@ -25,7 +29,8 @@ export interface VideoProvider {
   submit(input: VideoSubmitInput): Promise<VideoSubmitResult>
   status(requestId: string, meta: Record<string, unknown>): Promise<VideoStatus>
   // 出一条成片的估算成本（美分），出片后写入 generations.provider_cost_cents
-  costCents(durationSeconds: number): number
+  // styleId：yir 两步走按风格决定要不要加合成图的费用
+  costCents(durationSeconds: number, styleId: string): number
 }
 
 // 可重试错误（网络/限流/5xx）：队列会重投；不可重试错误直接失败并退积分

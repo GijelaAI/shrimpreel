@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
-import { findDuration, findPackage, findPlan, isLocale, localePath, sellingPlans, site } from '#/config/site'
+import { defaultStyle, findDuration, findPackage, findPlan, findStyle, isLocale, localePath, sellingPlans, site } from '#/config/site'
 import { safeRedirectPath } from '#/lib/redirect'
 import { exportFileName, exportUserData } from './account-export'
 import { adminRoutes } from './admin'
@@ -285,9 +285,12 @@ app.post('/api/generations', async (c) => {
   const settings = await getSettings(c.env)
   assertOpen(settings, user)
   await rateLimit(c.env.GENERATE_LIMITER, user.id)
-  const body = await readJson<{ uploadId: string; durationId: string; mockOutcome: string; locale: string }>(c)
+  const body = await readJson<{ uploadId: string; durationId: string; styleId?: string; mockOutcome: string; locale: string }>(c)
   const duration = findDuration(body.durationId ?? '')
   if (!duration) throw new ApiError(400, 'invalid_duration')
+  // 不带 styleId 用默认风格；带了但不存在报错，不悄悄换风格
+  const style = body.styleId === undefined || body.styleId === null ? defaultStyle : findStyle(String(body.styleId))
+  if (!style) throw new ApiError(400, 'invalid_style')
   const db = c.env.DB
   const upload = await db
     .prepare('SELECT * FROM uploads WHERE id = ? AND user_id = ? AND expired_at IS NULL')
@@ -316,7 +319,7 @@ app.post('/api/generations', async (c) => {
            status, provider, provider_meta, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
         )
-        .bind(id, user.id, site.template.id, duration.id, duration.seconds, duration.credits, upload.id, providerId, meta, now, now),
+        .bind(id, user.id, style.id, duration.id, duration.seconds, duration.credits, upload.id, providerId, meta, now, now),
       ...ledgerStatements(db, {
         userId: user.id,
         delta: -duration.credits,

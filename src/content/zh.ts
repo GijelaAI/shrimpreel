@@ -3,17 +3,23 @@ import type { site as Site } from '#/config/site'
 import type { Content } from './en'
 
 type S = typeof Site
+type StyleId = S['styles'][number]['id']
+type StyleCopy = { name: string; tagline: string }
 
 export function zh(s: S): Content {
   const k = s.keyword
   // 是否在卖订阅（site.subscriptionsEnabled 且有套餐），决定订阅相关文案是否出现
   const subs = s.subscriptionsEnabled && s.plans.length > 0
   const b = s.brandName
+  const styles: Record<StyleId, StyleCopy> = {
+    'neon-shuffle-v1': { name: k, tagline: '逐拍还原原版舞步。' },
+  }
   const { uploadDays, outputDays } = s.retention
   const photoRetention = uploadDays > 0 ? `在上传 ${uploadDays} 天后自动删除` : '保留到你主动删除为止'
   const videoRetention = outputDays > 0 ? `在完成 ${outputDays} 天后自动删除` : '保留到你主动删除为止'
   const { ga4Id, cfBeaconToken } = s.analytics
   return {
+    styles,
     meta: {
       homeTitle: `${k} AI 视频生成器：一张照片生成同款视频`,
       homeDescription: `上传一张照片，几分钟内生成你主演的 ${k} 视频。原版舞步与机位不变，主角换成你。${subs ? '按秒计费，可单次购买积分，也可按月订阅。' : '按秒计费，积分永不过期。'}`,
@@ -69,6 +75,7 @@ export function zh(s: S): Content {
       change: '更换照片',
       uploading: '上传中…',
       uploaded: '照片已就绪',
+      stepStyle: '舞蹈风格',
       stepLength: '时长',
       seconds: (n: number) => `${n} 秒`,
       full: '完整版',
@@ -470,6 +477,7 @@ export function zh(s: S): Content {
       length_required: '浏览器上传文件的方式不受支持，请换个浏览器重试。',
       unsupported_file_type: '请上传 JPG、PNG 或 WebP 图片。',
       invalid_upload: '请重新上传照片。',
+      invalid_style: '这个舞蹈风格暂不可用，请换一个。',
       queue_unavailable: '生成队列繁忙，积分已退回，请重试。',
       payment_not_configured: '支付暂不可用。',
       payment_provider_error: '支付商未响应，请重试。',

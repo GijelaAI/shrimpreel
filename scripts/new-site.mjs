@@ -83,13 +83,13 @@ const topLevel = { keyword, brandName: brand, logoMark: logo, domain, supportEma
 for (const [key, value] of Object.entries(topLevel)) {
   siteSrc = replaceOnce(siteSrc, siteFile, `${key} = ${value}`, new RegExp(`(\\n  ${key}: )'(?:[^'\\\\]|\\\\.)*'`), `$1${q(value)}`)
 }
-// 模板 id 同时出现在 template.id 和 durations[].source 里
-const oldTemplateId = site.template.id
+// 默认风格 id 同时出现在 styles[0].id 和 styles[0].sources 里（多风格站点只换第一个，其余风格按需手改）
+const oldTemplateId = site.styles[0].id
 if (oldTemplateId !== templateId) {
   const count = siteSrc.split(oldTemplateId).length - 1
-  if (count < 2) throw new Error(`${siteFile}: 没找到 template.id "${oldTemplateId}" 及其 durations 源视频`)
+  if (count < 2) throw new Error(`${siteFile}: 没找到 styles[0].id "${oldTemplateId}" 及其 sources 源视频`)
   siteSrc = siteSrc.split(oldTemplateId).join(templateId)
-  changes.push(`${siteFile}  template.id 与 ${count - 1} 个时长源视频 → ${templateId}`)
+  changes.push(`${siteFile}  styles[0].id 与 ${count - 1} 个时长源视频 → ${templateId}`)
 }
 for (const [key, articleSlug] of Object.entries(articles)) {
   siteSrc = replaceOnce(siteSrc, siteFile, `articles[${key}].slug = ${articleSlug}`, new RegExp(`(\\{ key: '${key}', slug: )'[^']*'`), `$1${q(articleSlug)}`)
@@ -183,16 +183,16 @@ if (oldKeyword !== keyword) {
       })
   }
 }
-const missingSources = site.durations
-  .map((d) => `seed/templates/${d.source.split(oldTemplateId).join(templateId)}`)
+const sourceFiles = Object.values(site.styles[0].sources).map((file) => `seed/templates/${file.split(oldTemplateId).join(templateId)}`)
+const missingSources = sourceFiles
   .filter((file) => !existsSync(file))
 
 console.log(`
 接下来必须人工完成：
 1. 重写趋势专属文案（只换关键词会被判定为模板站）：src/content/en.ts 与 zh.ts 的 hero、whatIs、ideas、faq、guides、articles.trend、articles.howTo。
    首页正文要自然覆盖长尾词：${secondaryKeywords.join('、')}${hardcoded.length ? `\n   写死旧关键词 "${oldKeyword}" 的行：${hardcoded.join(', ')}` : ''}${extraArticles.length ? `\n   旧站的其他文章（${extraArticles.join('、')}）：重写，或从 site.articles 和两份文案里删掉` : ''}
-2. 换素材：public/demo/*（自有或已授权，并在 site.examples.*.credit 写来源）、public/og.png（1200×630）、public/favicon.svg。
-   生成用源视频${missingSources.length ? `（缺 ${missingSources.length} 个）` : ''}：${site.durations.map((d) => `seed/templates/${d.source.split(oldTemplateId).join(templateId)}`).join('、')}
+2. 换素材：public/demo/*（自有或已授权，并在 site.styles[].examples.*.credit 写来源）、public/og.png（1200×630）、public/favicon.svg。
+   生成用源视频${missingSources.length ? `（缺 ${missingSources.length} 个）` : ''}：${sourceFiles.join('、')}
 3. Cloudflare 资源（把 database_id、KV id 写回 wrangler.jsonc）：
    npx wrangler d1 create ${name}
    npx wrangler r2 bucket create ${name}-media

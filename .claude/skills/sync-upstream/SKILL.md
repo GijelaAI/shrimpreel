@@ -73,7 +73,7 @@ npm run test:e2e       # 端口被占用时 E2E_PORT=<端口> npm run test:e2e
 npm run seo:check      # 另开 dev server；文案有改动时必跑
 ```
 
-e2e 的 global-setup 按 `site.durations[0].source` 检查本地 R2 里的源视频，报 404 时先看 `seed/templates/` 的文件名和 `site.durations[].source` 是否一致，这是站点层的问题。
+e2e 的 global-setup 按默认风格的 `site.styles[0].sources`（第一个档位）检查本地 R2 里的源视频，报 404 时先看 `seed/templates/` 的文件名和 `site.styles[].sources` 是否一致，这是站点层的问题。
 
 失败先修。修法要符合分层：共用代码的失败说明合并取错了版本或模板本身有 bug（后者停下告诉用户，回模板修）；站点层的失败在站点文件里修。
 

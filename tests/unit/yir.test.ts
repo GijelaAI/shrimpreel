@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { site } from '#/config/site'
+import { defaultStyle, site, type Style } from '#/config/site'
 import { signedUploadUrl } from '#/server/media'
 import { createYirProvider } from '#/server/video/yir'
 
@@ -7,8 +7,10 @@ import { createYirProvider } from '#/server/video/yir'
 const env = (vars: Record<string, string> = {}) =>
   ({ APP_ENV: 'production', SITE_URL: 'https://moonhop.ai', SESSION_SECRET: 'a'.repeat(64), YIR_API_KEY: 'yir_test', ...vars }) as unknown as Env
 
-const input = (webhookUrl = 'https://moonhop.ai/api/webhooks/yir?gen=gen_1&token=t') => ({
+// style 取站点的默认风格对象本身：withScene 改它的 scene 后，submit 立刻按两步走
+const input = (webhookUrl = 'https://moonhop.ai/api/webhooks/yir?gen=gen_1&token=t', style: Style = defaultStyle) => ({
   generationId: 'gen_1',
+  style,
   durationSeconds: 12,
   imageUrl: 'https://moonhop.ai/media/uploads/upl_1?exp=1&sig=s',
   sourceVideoUrl: 'https://moonhop.ai/media/templates/neon-12s.mp4',
@@ -33,12 +35,15 @@ function stubFetch(routes: Record<string, () => Response>) {
   return calls
 }
 
-// 站点会配置自己的 scene、routingOnly：用例默认按单步、不限定渠道跑，结束后还原站点配置
-const yirConfig = site.video.yir as { scene: unknown; routingOnly: readonly string[] | null }
-const siteYir = { scene: yirConfig.scene, routingOnly: yirConfig.routingOnly }
+// 站点会配置自己的风格 scene、prompt 和 routingOnly：用例默认按单步、默认 prompt、不限定渠道跑，结束后还原站点配置
+const yirConfig = site.video.yir as { routingOnly: readonly string[] | null; sceneImage: unknown }
+const styleConfig = defaultStyle as { scene: unknown; prompt: string | null }
+const siteYir = { routingOnly: yirConfig.routingOnly, sceneImage: yirConfig.sceneImage }
+const siteStyle = { scene: styleConfig.scene, prompt: styleConfig.prompt }
 
 beforeEach(() => {
-  yirConfig.scene = null
+  styleConfig.scene = null
+  styleConfig.prompt = null
   yirConfig.routingOnly = null
 })
 
@@ -46,6 +51,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
   Object.assign(yirConfig, siteYir)
+  Object.assign(styleConfig, siteStyle)
 })
 
 describe('yir provider：提交', () => {
@@ -215,24 +221,14 @@ describe('yir provider：查询', () => {
   })
 })
 
-const SCENE = {
-  frame: 'neon-scene.jpg',
-  model: 'google/nano-banana-2',
-  prompt: 'Put the person from Image 2 into Image 1.',
-  resolution: '1K',
-  aspectRatio: '9:16',
-  costCents: 2,
-  routingOnly: null,
-}
+const SCENE = { frame: 'neon-scene.jpg', prompt: 'Put the person from Image 2 into Image 1.' }
+const SCENE_IMAGE = { model: 'google/nano-banana-2', resolution: '1K', aspectRatio: '9:16', costCents: 2, routingOnly: null }
 
+// 给默认风格配上 scene、共用图片模型参数；afterEach 还原
 async function withScene(run: () => Promise<void>) {
-  const yir = site.video.yir as { scene: typeof SCENE | null }
-  yir.scene = SCENE
-  try {
-    await run()
-  } finally {
-    yir.scene = null
-  }
+  styleConfig.scene = SCENE
+  yirConfig.sceneImage = SCENE_IMAGE
+  await run()
 }
 
 describe('yir provider：两步走（先合成首帧，再做动作参考）', () => {
@@ -245,7 +241,7 @@ describe('yir provider：两步走（先合成首帧，再做动作参考）', (
     }),
     '/scene.jpeg?sig=1': () => new Response(new Uint8Array(1234)),
   }
-  const meta = { stage: 'scene', generationId: 'gen_1', durationSeconds: 12, sourceVideoUrl: input().sourceVideoUrl, webhookUrl: input().webhookUrl }
+  const meta = { stage: 'scene', generationId: 'gen_1', durationSeconds: 12, sourceVideoUrl: input().sourceVideoUrl, webhookUrl: input().webhookUrl, prompt: null }
 
   it('第一步提交图片任务：首帧和照片作为两张参考图，幂等键从任务 id 推出，meta 记下第二步要用的参数', async () => {
     await withScene(async () => {
@@ -329,9 +325,33 @@ describe('yir provider：两步走（先合成首帧，再做动作参考）', (
     })
   })
 
-  it('估算成本加上一张合成图', async () => {
+  it('估算成本：风格走两步才加一张合成图', async () => {
+    const base = Math.round(12 * site.video.yir.costCentsPerSecond)
+    expect(createYirProvider(env()).costCents(12, defaultStyle.id)).toBe(base)
     await withScene(async () => {
-      expect(createYirProvider(env()).costCents(12)).toBe(Math.round(12 * site.video.yir.costCentsPerSecond) + 2)
+      expect(createYirProvider(env()).costCents(12, defaultStyle.id)).toBe(base + 2)
+      // 不存在的风格按单步估算
+      expect(createYirProvider(env()).costCents(12, 'gone')).toBe(base)
     })
+  })
+
+  it('多风格：各风格用自己的首帧、合成 prompt 和视频 prompt；没配 scene 的风格走单步', async () => {
+    const other: Style = { ...defaultStyle, id: 'party-v1', prompt: 'Keep the party hat.', scene: { frame: 'party-scene.jpg', prompt: 'Put Image 2 at the party in Image 1.' } }
+    const plain: Style = { ...defaultStyle, id: 'plain-v1', prompt: 'Plain prompt.', scene: null }
+    yirConfig.sceneImage = SCENE_IMAGE
+
+    const scene = stubFetch({ '/v1/images/generations': () => json(202, { id: 'job_s', status: 'queued' }) })
+    const result = await createYirProvider(env()).submit(input(undefined, other))
+    const sceneBody = JSON.parse(String(scene[0]!.init!.body))
+    expect(sceneBody.input.prompt).toBe('Put Image 2 at the party in Image 1.')
+    expect(sceneBody.input.references[0]).toEqual({ role: 'reference_image', url: 'https://moonhop.ai/media/templates/party-scene.jpg' })
+    expect(sceneBody).toMatchObject({ model: SCENE_IMAGE.model, parameters: { resolution: '1K', aspect_ratio: '9:16' } })
+    // 视频 prompt 随 meta 带到第二步
+    expect(result.meta).toMatchObject({ stage: 'scene', prompt: 'Keep the party hat.' })
+
+    const single = stubFetch({ '/v1/videos/generations': () => json(202, { id: 'job_1', status: 'queued' }) })
+    expect(await createYirProvider(env()).submit(input(undefined, plain))).toEqual({ requestId: 'job_1', meta: {} })
+    expect(JSON.parse(String(single[0]!.init!.body)).input.prompt).toBe('Plain prompt.')
+    expect(single.some((c) => c.url.includes('/images/generations'))).toBe(false)
   })
 })

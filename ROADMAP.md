@@ -140,6 +140,7 @@
    - ~~#26~~ 已完成（2026-10-21）。首页可选转化区块：痛点（`problem`）和“自己拍 vs 用本站”逐行对比（`withWithout`），文案设为 `null` 就不渲染；套餐可选 `anchorPriceCents` 划线原价和“Save X%”，只能填真实卖过的价格。不加评价区块：新站没有真实评价。
    - ~~#33~~ 已完成（2026-10-21）。可选的 yir.ai 视频服务商，见下文。
    - ~~#34~~ 已完成（2026-10-25）。可选的 NanoAPI 视频服务商，见下文。
+   - ~~#35~~ 已完成（2026-10-25）。多舞蹈风格（`site.styles`），见下文。
 3. 第三批，变现：
    - ~~#6~~ 已完成（2026-10-21）。积分分批次与过期，见下文。
    - ~~#9~~ 已完成（2026-10-21）。兑换码，见下文。
@@ -181,6 +182,15 @@
   - 媒体：NanoAPI 下载素材用浏览器 UA，读视频要 Range。不支持 Range 或不带扩展名的视频地址都以 `internal_error` 失败，并全额退款。
   - 未验证：后台“测试连接”按钮没有点过（直接调 `/v1/balance` 正常）；换装这一步没有接进 NanoAPI provider。
 
+
+**#35 多舞蹈风格**（2026-10-25）
+
+- 一个站点可以配多种风格（如“精灵舞”和“圣诞派对舞”）：`site.styles[]` 每项有自己的 `id`（写入 `generations.template_id`）、各时长档位的源视频 `sources`、可选的 `prompt`、yir 两步走的 `scene`（首帧 + 合成 prompt）和首页素材 `examples`。第一个是默认风格；只有一种时界面和以前一样。
+- 配置迁移：`template.id` 和 `durations[].source` 移到 `styles[0]`；`site.examples` 只留全站共用的 `ideas`；`site.video.yir.scene` 拆成共用的 `sceneImage`（模型、分辨率、成本）和风格自己的 `scene`。导出 `Style`、`findStyle`、`defaultStyle`。
+- 服务端：`POST /api/generations` 接受 `styleId`，缺省用默认风格，不存在返回 400 `invalid_style`；`jobs.ts` 按 `template_id` 找源视频，风格或源视频没了按 `invalid_input` 失败退积分；`VideoProvider.costCents(seconds, styleId)`，yir 只在该风格有 `scene` 时加合成图费用。积分、幂等键、两步走的固定 `file_id` 与写回逻辑没有改动。
+- 前端：生成器多于一种风格时在时长上方出现风格单选（`?style=<id>` 预选）；首页 hero 加风格标签（`tablist`，方向键可用）并与生成器同步；“Made with”每种风格一行（服务端渲染）；`seo.ts` 用默认风格的素材。
+- 测试：`tests/unit/styles.test.ts`（id 不重复、sources 覆盖所有时长、en/zh 文案齐全）、yir 与 nanoapi 的按风格 prompt、两步走判断、`jobs.test.ts` 风格缺失时失败；e2e 2 个（API 的默认风格与 `invalid_style`；多风格站点的标签、选择和记录，模板只有一种风格时跳过）。
+- 未验证：多风格界面只在临时加第二个风格的配置下跑过 e2e，模板默认仍是一种风格；真实 provider 没有按风格实测。
 **#6 积分分批次与过期**（2026-10-21）
 
 - 迁移 `0009_credit_grants.sql`：批次表 `credit_grants`、扣减明细 `credit_allocations`、断言表 `credit_guard`；现有余额转成永不过期的 `legacy` 批次。

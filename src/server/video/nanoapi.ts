@@ -84,7 +84,8 @@ export function createNanoapiProvider(env: Env): VideoProvider {
     async submit(input) {
       const existing = await findExisting(input.imageUrl, input.sourceVideoUrl)
       if (existing) return { requestId: existing, meta: {} }
-      const { model, mode, prompt, resolution } = site.video.nanoapi
+      const { model, mode, resolution } = site.video.nanoapi
+      const prompt = input.style.prompt ?? site.video.nanoapi.prompt
       const body: Record<string, unknown> = {
         model,
         mode,

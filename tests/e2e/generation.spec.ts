@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
-import { formatPrice } from '#/config/site'
-import { ORIGIN, buyPackage, credits, devLogin, json, ledger, post, uniqueEmail, uploadPhoto } from './helpers'
+import { STYLES, defaultStyle, formatPrice, site } from '#/config/site'
+import { ORIGIN, PHOTO, buyPackage, credits, devLogin, json, ledger, post, uniqueEmail, uploadPhoto } from './helpers'
 
-type Generation = { id: string; status: string; videoUrl: string | null }
+type Generation = { id: string; status: string; videoUrl: string | null; templateId: string }
 
 const ADMIN_EMAIL = 'admin@example.com'
 
@@ -103,4 +103,67 @@ test('并发轮询只落库一次、成片不被误删；后台记录服务商�
   await page.goto('/admin')
   await expect(page.getByTestId('admin-margin')).toContainText('近 30 天服务商成本')
   await expect(page.getByTestId('admin-margin')).toContainText('估算毛利')
+})
+
+test('风格：不带 styleId 用默认风格，不存在的风格返回 400 invalid_style 且不扣积分', async ({ request }) => {
+  await devLogin(request, uniqueEmail('style-api'))
+  await buyPackage(request, 'starter')
+  const start = async (extra: Record<string, unknown>, status: number) => {
+    const { upload } = await json<{ upload: { id: string } }>(uploadPhoto(request), 201)
+    return json<{ generation: Generation; error: string }>(post(request, '/api/generations', { uploadId: upload.id, durationId: 'short', ...extra }), status)
+  }
+
+  const bad = await start({ styleId: 'no-such-style' }, 400)
+  expect(bad.error).toBe('invalid_style')
+  expect(await credits(request)).toBe(20)
+  expect(((await json<{ generations: Generation[] }>(request.get('/api/generations'))).generations)).toHaveLength(0)
+
+  const fallback = await start({ mockOutcome: 'hang' }, 201)
+  expect(fallback.generation.templateId).toBe(defaultStyle.id)
+  expect(await credits(request)).toBe(14)
+})
+
+test.describe('多风格站点', () => {
+  test.skip(STYLES.length < 2, '站点只有一种风格')
+
+  test('首页切换 hero 标签与生成器同步，选第二个风格生成，记录里是所选风格；?style= 可预选', async ({ page }) => {
+    const second = STYLES[1]!
+    await devLogin(page.request, uniqueEmail('style-ui'))
+    await buyPackage(page.request, 'starter')
+
+    // SSR 默认显示默认风格；点第二个标签后素材和生成器的选中项一起切换
+    await page.goto('/')
+    await page.waitForLoadState('networkidle') // 等水合完成再点，否则点击落在还没绑事件的 SSR 按钮上
+    await expect(page.getByRole('tablist')).toBeVisible()
+    await expect(page.getByTestId(`hero-tab-${defaultStyle.id}`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByTestId(`style-${defaultStyle.id}`)).toHaveAttribute('aria-checked', 'true')
+    await page.getByTestId(`hero-tab-${second.id}`).click()
+    await expect(page.getByTestId(`hero-tab-${second.id}`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByTestId(`style-${second.id}`)).toHaveAttribute('aria-checked', 'true')
+    await expect(page.locator(`[role="tabpanel"] video[src="${second.examples.original.video}"]`)).toHaveCount(1)
+    // “Made with”每个风格各一行，不依赖 JS
+    for (const style of STYLES) await expect(page.getByTestId(`made-with-${style.id}`)).toBeVisible()
+
+    // 键盘：方向键在标签间移动并选中
+    await page.getByTestId(`hero-tab-${second.id}`).focus()
+    await page.keyboard.press('ArrowLeft')
+    await expect(page.getByTestId(`hero-tab-${STYLES[0]!.id}`)).toHaveAttribute('aria-selected', 'true')
+
+    await page.getByTestId(`style-${second.id}`).click()
+    await page.getByTestId('photo-input').setInputFiles(PHOTO)
+    await page.getByTestId('duration-short').click()
+    await page.getByTestId('consent').check()
+    await expect(page.getByTestId('generate')).toBeEnabled()
+    await page.getByTestId('generate').click()
+    await expect(page.getByTestId('generation-status')).toHaveAttribute('data-status', 'succeeded', { timeout: 60_000 })
+    const { generations } = await json<{ generations: Generation[] }>(page.request.get('/api/generations'))
+    expect(generations.map((g) => g.templateId)).toEqual([second.id])
+
+    // ?style= 预选；无效的 id 忽略
+    await page.goto(`/?style=${second.id}`)
+    await expect(page.getByTestId(`style-${second.id}`)).toHaveAttribute('aria-checked', 'true')
+    await page.goto('/?style=no-such-style')
+    await expect(page.getByTestId(`style-${defaultStyle.id}`)).toHaveAttribute('aria-checked', 'true')
+    expect(site.styles.length).toBeGreaterThan(1)
+  })
 })

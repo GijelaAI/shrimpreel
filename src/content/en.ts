@@ -3,6 +3,8 @@
 import type { ArticleKey, site as Site } from '#/config/site'
 
 type S = typeof Site
+type StyleId = S['styles'][number]['id']
+type StyleCopy = { name: string; tagline: string }
 type ArticleContent = { title: string; description: string; intro: string; sections: Array<{ h: string; p: string[] }> }
 // FAQ 答案可附一条文章链接；锚文本用与文章标题不同的长尾词
 type FaqItem = { q: string; a: string; guide?: { article: ArticleKey; label: string } }
@@ -19,7 +21,12 @@ export function en(s: S) {
   const photoRetention = uploadDays > 0 ? `deleted automatically ${uploadDays} days after upload` : 'kept until you delete them'
   const videoRetention = outputDays > 0 ? `kept for ${outputDays} days after they finish` : 'kept until you delete them'
   const { ga4Id, cfBeaconToken } = s.analytics
+  // 每种风格的展示名和一句话介绍；site.styles 加风格时这里补一项（缺了 typecheck 报错），zh.ts 同
+  const styles: Record<StyleId, StyleCopy> = {
+    'neon-shuffle-v1': { name: k, tagline: 'The original routine, beat for beat.' },
+  }
   return {
+    styles,
     meta: {
       // 首页 title 不加品牌后缀：品牌通常已含关键词，控制在 60 字符内（seo:check 会校验）
       homeTitle: `${k} AI Video Generator from One Photo`,
@@ -77,6 +84,7 @@ export function en(s: S) {
       change: 'Change photo',
       uploading: 'Uploading…',
       uploaded: 'Photo ready',
+      stepStyle: 'Dance style',
       stepLength: 'Length',
       seconds: (n: number) => `${n} s`,
       full: 'full',
@@ -495,6 +503,7 @@ export function en(s: S) {
       length_required: 'Your browser sent the file in a way we can’t accept. Please try again in another browser.',
       unsupported_file_type: 'Please upload a JPG, PNG or WebP image.',
       invalid_upload: 'Please upload the photo again.',
+      invalid_style: 'That dance style isn’t available. Please pick another one.',
       queue_unavailable: 'Our render queue is busy. Your credits were returned; please try again.',
       payment_not_configured: 'Payments are not available right now.',
       payment_provider_error: 'The payment provider did not respond. Please try again.',

@@ -56,7 +56,7 @@ node scripts/new-site.mjs --keyword "<关键词>" --domain <域名> --keywords "
 只在简介给出时改，否则保留模板值：
 
 - `packages`：积分包的积分数和价格。`id` 不要改，支付商商品映射（`*_PRODUCTS`）按 id 对应。
-- `durations`：时长档位和积分。`source` 文件名跟着 `template.id`，改了档位要同步 `seed/templates/` 的文件。
+- `durations`：时长档位和积分。源视频文件名在 `styles[].sources`（键 = 档位 id，文件名跟着风格 `id`），改了档位要同步每个风格的 `sources` 和 `seed/templates/` 的文件。
 - `video.falModel`、`video.costCentsPerVideoSecond`、`video.sourceFps`：换模型时三个一起核对，成本用来算毛利和告警。
 - `signupBonusCredits`、`signupBonusValidDays`（赠送积分有效期，0 = 永不过期）、`retention`、`takedownSlaHours`、`trendPlatform`。
 - `examples.*.credit`：换成真实素材后写原作者；还是占位素材就保留 “Demo clip”。
@@ -67,10 +67,10 @@ node scripts/new-site.mjs --keyword "<关键词>" --domain <域名> --keywords "
 
 ### 5. 素材
 
-- 有用户提供的授权素材：放进 `public/demo/`（同名替换）、`seed/templates/<template.id>-<秒数>s.mp4`、`public/og.png`（1200×630）、`public/favicon.svg`，并在 `site.examples.*.credit` 写来源。
-- 没有：运行 `node scripts/generate-placeholder-media.mjs`（需要 ffmpeg）生成原创占位素材，文件名按新的 `template.id` 和品牌名生成。然后在 `site.ts` 的 `template` 旁写 `// TODO(site): 换成真实的趋势源视频（seed/templates/）`、在 `examples` 旁写 `// TODO(site): 换成授权的展示素材并写 credit`。
+- 有用户提供的授权素材：放进 `public/demo/`（同名替换）、`seed/templates/<风格 id>-<秒数>s.mp4`、`public/og.png`（1200×630）、`public/favicon.svg`，并在 `site.styles[].examples.*.credit` 写来源。
+- 没有：运行 `node scripts/generate-placeholder-media.mjs`（需要 ffmpeg）生成原创占位素材，文件名按新的默认风格 `id`（`styles[0].id`）和品牌名生成。然后在 `site.ts` 的 `styles` 旁写 `// TODO(site): 换成真实的趋势源视频（seed/templates/）`、在 `styles[].examples` 旁写 `// TODO(site): 换成授权的展示素材并写 credit`。
 - 没有 ffmpeg：把 `seed/templates/` 里的旧文件按新文件名复制一份，同样写上面两条 TODO。
-- 最后 `git rm` 掉 `seed/templates/` 里旧 `template.id` 的源视频，只留 `site.durations[].source` 和 `site.video.yir.scene.frame` 用到的文件。
+- 最后 `git rm` 掉 `seed/templates/` 里旧风格 `id` 的源视频，只留 `site.styles[].sources` 和 `site.styles[].scene.frame` 用到的文件。
 - 不要从网上下载趋势视频当素材，版权和肖像权都过不去。
 
 ### 6. wrangler vars 先不动

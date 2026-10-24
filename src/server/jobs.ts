@@ -1,4 +1,4 @@
-import { findDuration } from '#/config/site'
+import { findDuration, findStyle } from '#/config/site'
 import { jobToken, signedUploadUrl, templateSourceUrl } from './media'
 import { expireStatements, generationRefundStatements } from './credits'
 import { notifyGenerationFinished } from './notifications'
@@ -116,9 +116,11 @@ async function submitGeneration(env: Env, generation: GenerationRow) {
   if (!claimed.meta.changes) return
 
   const duration = findDuration(generation.duration_id)
+  const style = findStyle(generation.template_id)
+  const sourceFile = duration ? style?.sources[duration.id] : undefined
   const upload = await env.DB.prepare('SELECT * FROM uploads WHERE id = ?').bind(generation.upload_id).first<UploadRow>()
-  if (!duration || !upload || upload.expired_at) {
-    await failGeneration(env, generation.id, 'invalid_input', 'Upload or duration no longer exists')
+  if (!duration || !style || !sourceFile || !upload || upload.expired_at) {
+    await failGeneration(env, generation.id, 'invalid_input', 'Upload, style or duration no longer exists')
     return
   }
 
@@ -133,10 +135,11 @@ async function submitGeneration(env: Env, generation: GenerationRow) {
     // 重新提交时请求体要和第一次一致，签名按任务创建时间算（任务 45 分钟超时，2 小时有效期足够）
     const result = await provider.submit({
       generationId: generation.id,
+      style,
       durationSeconds: generation.duration_seconds,
       imageUrl: await signedUploadUrl(env, upload.id, Date.parse(generation.created_at)),
-      sourceVideoUrl: templateSourceUrl(env, duration.source),
-      sourceVideoKey: `templates/${duration.source}`,
+      sourceVideoUrl: templateSourceUrl(env, sourceFile),
+      sourceVideoKey: `templates/${sourceFile}`,
       webhookUrl: webhookUrl.toString(),
       meta: baseMeta,
     })
@@ -215,7 +218,7 @@ async function pollGeneration(env: Env, generation: GenerationRow) {
     await env.MEDIA.put(outputKey, await source.arrayBuffer(), { httpMetadata: { contentType: 'video/mp4' } })
   }
   const now = nowIso()
-  const costCents = status.costCents ?? provider.costCents(generation.duration_seconds)
+  const costCents = status.costCents ?? provider.costCents(generation.duration_seconds, generation.template_id)
   const saved = await env.DB.prepare(
     `UPDATE generations SET status = 'succeeded', output_r2_key = ?, provider_cost_cents = ?, completed_at = ?, updated_at = ?
      WHERE id = ? AND status = 'processing'`,

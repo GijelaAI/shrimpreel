@@ -7,7 +7,7 @@
 | 关键词 | `--keyword` → `site.keyword` | 必填，问用户 |
 | 品牌名 | `--brand` → `site.brandName` | 默认 `<关键词> AI` |
 | 域名 | `--domain` → `site.domain`、`EMAIL_FROM`；上线时的 `SITE_URL` | `<slug>.example.com` + `TODO(site)` |
-| slug | `--slug` → `template.id`、文章 slug、`--name` 的默认值 | 关键词的 kebab-case；中文关键词必须给 |
+| slug | `--slug` → 默认风格 `id`（`styles[0].id`）、文章 slug、`--name` 的默认值 | 关键词的 kebab-case；中文关键词必须给 |
 | Worker 名 | `--name` → `wrangler.jsonc` 资源名、`package.json` 的 `name` | 默认等于 slug |
 | 长尾词 | `--keywords` → `site.seo.secondaryKeywords` | 推断 3–5 个用户真会搜的词（`<关键词> filter`、`<关键词> dance` 之类），脚本会再补 `AI`、`video`、`trend` 三个 |
 | 一句话口号 | `hero.subtitle`、`meta.homeDescription` | 从趋势本身推断，不留 TODO |

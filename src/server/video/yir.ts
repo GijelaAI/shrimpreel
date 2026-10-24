@@ -1,11 +1,11 @@
 // yir.ai 网关（可选的第二个视频服务商，VIDEO_PROVIDER=yir）：https://yir.ai/docs
 // 照片 + 模板源视频按 reference 模式提交（Kling Motion Control），两者都给公开 HTTPS 地址，yir 提交时各下载一次。
-// 配了 site.video.yir.scene 时分两步：先用图片模型把照片里的人合成进源视频首帧，再拿合成图做动作参考，成片保留源视频的场景。
+// 风格配了 scene 时分两步：先用图片模型把照片里的人合成进源视频首帧，再拿合成图做动作参考，成片保留源视频的场景。
 // Idempotency-Key 从生成任务 id 推出：队列重投或 Worker 中断后重新提交会拿回同一个 Job，不会重复计费。
 // yir 按请求体识别同一请求，所以请求体必须每次一致（jobs.ts 里图片签名按任务创建时间算；
 // 合成图的结果地址每次查询都重新签名，所以先传进 yir Files API，第二步用固定的 file_id 引用）。
 // webhook 只当“该去查一下了”的信号，结果始终用 API key 重新拉取。
-import { site } from '#/config/site'
+import { findStyle, site } from '#/config/site'
 import { templateSourceUrl } from '../media'
 import { cleanSecret } from '../util'
 import type { VideoProvider, VideoStatus } from './types'
@@ -48,6 +48,7 @@ interface SceneMeta {
   durationSeconds: number
   sourceVideoUrl: string
   webhookUrl: string
+  prompt: string | null // 风格的 prompt，null 用 site.video.yir.prompt
 }
 
 type Reference = { role: 'reference_image'; url: string } | { role: 'reference_image'; file_id: string }
@@ -85,8 +86,9 @@ export function createYirProvider(env: Env): VideoProvider {
     return job.id
   }
 
-  function submitVideo(generationId: string, image: Reference, sourceVideoUrl: string, durationSeconds: number, webhookUrl: string) {
-    const { model, prompt, resolution, routingOnly } = site.video.yir
+  function submitVideo(generationId: string, image: Reference, sourceVideoUrl: string, durationSeconds: number, webhookUrl: string, stylePrompt: string | null) {
+    const { model, resolution, routingOnly } = site.video.yir
+    const prompt = stylePrompt ?? site.video.yir.prompt
     const body = {
       model,
       input: { type: 'reference', prompt, references: [image, { role: 'reference_video', url: sourceVideoUrl }] },
@@ -151,22 +153,23 @@ export function createYirProvider(env: Env): VideoProvider {
     const fileId = await uploadScene(meta.generationId, image.url, image.media_type)
     if (!fileId) return { state: 'pending' }
     const reference = { role: 'reference_image', file_id: fileId } as const
-    const videoId = await submitVideo(meta.generationId, reference, meta.sourceVideoUrl, meta.durationSeconds, meta.webhookUrl)
+    const videoId = await submitVideo(meta.generationId, reference, meta.sourceVideoUrl, meta.durationSeconds, meta.webhookUrl, meta.prompt)
     return { state: 'pending', next: { requestId: videoId, meta: { stage: 'video', sceneCostCents: settledCents(job) } } }
   }
 
   return {
     id: 'yir',
     async submit(input) {
-      const scene = site.video.yir.scene
+      const scene = input.style.scene
       if (!scene) {
         const reference = { role: 'reference_image', url: input.imageUrl } as const
-        const requestId = await submitVideo(input.generationId, reference, input.sourceVideoUrl, input.durationSeconds, input.webhookUrl)
+        const requestId = await submitVideo(input.generationId, reference, input.sourceVideoUrl, input.durationSeconds, input.webhookUrl, input.style.prompt)
         return { requestId, meta: {} }
       }
       // Image 1 是源视频首帧，Image 2 是用户照片，和 scene.prompt 的写法对应
+      const image = site.video.yir.sceneImage
       const body = {
-        model: scene.model,
+        model: image.model,
         input: {
           type: 'image',
           prompt: scene.prompt,
@@ -175,15 +178,16 @@ export function createYirProvider(env: Env): VideoProvider {
             { role: 'reference_image', url: input.imageUrl },
           ],
         },
-        parameters: { resolution: scene.resolution, aspect_ratio: scene.aspectRatio, n: 1 },
+        parameters: { resolution: image.resolution, aspect_ratio: image.aspectRatio, n: 1 },
       }
-      const requestId = await submitJob('images', withDelivery(body, input.webhookUrl, scene.routingOnly), `${input.generationId}:scene`)
+      const requestId = await submitJob('images', withDelivery(body, input.webhookUrl, image.routingOnly), `${input.generationId}:scene`)
       const meta: SceneMeta = {
         stage: 'scene',
         generationId: input.generationId,
         durationSeconds: input.durationSeconds,
         sourceVideoUrl: input.sourceVideoUrl,
         webhookUrl: input.webhookUrl,
+        prompt: input.style.prompt,
       }
       return { requestId, meta: { ...meta } }
     },
@@ -202,7 +206,7 @@ export function createYirProvider(env: Env): VideoProvider {
       // 两步走的成本 = 合成图 + 视频；合成图账单当时还没结算就按配置估算
       const videoCents = settledCents(job)
       const sceneCents = meta.stage !== 'video' ? 0
-        : typeof meta.sceneCostCents === 'number' ? meta.sceneCostCents : (site.video.yir.scene?.costCents ?? 0)
+        : typeof meta.sceneCostCents === 'number' ? meta.sceneCostCents : site.video.yir.sceneImage.costCents
       return { state: 'completed', output: { url: video.url }, costCents: videoCents === undefined ? undefined : videoCents + sceneCents }
     },
 
@@ -211,8 +215,9 @@ export function createYirProvider(env: Env): VideoProvider {
 }
 
 // 估算：Motion Control 按参考视频实测秒数计费，参考视频就是模板源视频，时长固定；两步走再加一张合成图
-export function yirCostCents(durationSeconds: number) {
-  return Math.round(durationSeconds * site.video.yir.costCentsPerSecond) + (site.video.yir.scene?.costCents ?? 0)
+export function yirCostCents(durationSeconds: number, styleId: string) {
+  const twoStep = !!findStyle(styleId)?.scene
+  return Math.round(durationSeconds * site.video.yir.costCentsPerSecond) + (twoStep ? site.video.yir.sceneImage.costCents : 0)
 }
 
 // 账单已结算才是最终金额；还在对账（pending）时返回 undefined，由 costCents() 估算

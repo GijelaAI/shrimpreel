@@ -57,9 +57,11 @@ for (const [name, palette] of Object.entries(palettes)) {
   poster(file, join(demoDir, `${name}.jpg`))
 }
 
-// 生成用模板源视频：每个时长档位一段（provider 输出时长 = 源视频时长），文件名跟 site.durations[].source 走
-for (const { seconds, source } of site.durations) {
-  video(join(templateDir, source), palettes.original, seconds)
+// 生成用模板源视频：每个时长档位一段（provider 输出时长 = 源视频时长），文件名跟 site.styles[].sources 走
+for (const style of site.styles) {
+  for (const { id, seconds } of site.durations) {
+    video(join(templateDir, style.sources[id]), palettes.original, seconds)
+  }
 }
 
 // 示例“用户照片”（抽象人像剪影）+ e2e 上传 fixture

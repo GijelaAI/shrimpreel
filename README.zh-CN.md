@@ -69,7 +69,7 @@ npm run dev -- --host 127.0.0.1      # http://127.0.0.1:3000
    node scripts/new-site.mjs --keyword "Moon Hop" --domain moonhop.ai --keywords "AI dance video,Moon Hop filter" --write  # 写入
    ```
    脚本一次改好以下内容，并列出剩下必须人工完成的清单：
-   - `site.ts`：关键词、品牌、域名、邮箱、`template.id`、文章 slug、长尾词、发布/更新日期；同时清空旧站的站长验证、IndexNow key 和统计 ID。
+   - `site.ts`：关键词、品牌、域名、邮箱、默认风格的 `id`（`styles[0].id`）、文章 slug、长尾词、发布/更新日期；同时清空旧站的站长验证、IndexNow key 和统计 ID。
    - `wrangler.jsonc`：资源名和 ratelimit `namespace_id`，D1/KV id 重置为占位值。
    - `package.json`：`name`。
    - 删除 `wrangler.staging.jsonc`（模板自身的预发配置）。
@@ -80,10 +80,11 @@ npm run dev -- --host 127.0.0.1      # http://127.0.0.1:3000
    - 文案按语言拆包，浏览器只下载当前语言（含法律页全文）。组件里照常用 `getContent(locale)`；只有在根路由之外、渲染之前要用文案时，才需要先 `await loadContent(locale)`。
    - 加一种语言：在 `site.ts` 的 `LOCALES` 和 `LOCALE_META` 里登记，新建 `src/content/<locale>.ts`（类型与 `en.ts` 一致），再在 `src/lib/i18n.ts` 的 `loaders` 里加一行动态 import。
 4. **换素材**：
-   - `seed/templates/<template.id>-<秒数>s.mp4`：生成用的源视频，部署后上传到 R2 的 `templates/`。
-   - `public/demo/*`：首页展示视频和海报。必须是自有或已获授权的素材，在 `site.examples.*.credit` 写明来源。
+   - `seed/templates/<风格 id>-<秒数>s.mp4`：生成用的源视频，每种风格的每个时长档位一段（`site.styles[].sources`），部署后上传到 R2 的 `templates/`。
+   - `public/demo/*`：首页展示视频和海报。必须是自有或已获授权的素材，在 `site.styles[].examples.*.credit` 写明来源。
    - `public/og.png`、`public/favicon.svg`。
-   - `node scripts/generate-placeholder-media.mjs`（需要 ffmpeg）按 `site.durations` 的文件名和品牌名重新生成原创占位素材。之后删掉 `seed/templates/` 里旧 `template.id` 的文件。
+   - **多种舞蹈风格**（可选）：在 `site.styles` 里加项。每项有 `id`（写入 `generations.template_id`，发布后不要改）、`sources`（每个 `durations[].id` 一个文件）、`prompt`（`null` = 用 `video.yir.prompt` / `video.nanoapi.prompt`）、`scene`（yir 两步走的 `{ frame, prompt }`，`null` = 单步）和 `examples`（`original`、`aiVersions`、`madeWith`）。第一项是默认风格。同时在 `en.ts`、`zh.ts` 补 `styles['<id>'] = { name, tagline }`。只有一种风格时界面没有风格选择；多于一种时生成器出现选择（`/?style=<id>` 预选），首页 hero 出现风格标签，“Made with”每种风格一行。
+   - `node scripts/generate-placeholder-media.mjs`（需要 ffmpeg）按 `site.styles[].sources` 的文件名和品牌名重新生成原创占位素材。之后删掉 `seed/templates/` 里旧风格的文件。
 5. **改 `wrangler.jsonc` 的 `vars`**：`SITE_URL`、`APP_ENV=production`、`PAYMENT_PROVIDER`、`VIDEO_PROVIDER`、`MODERATION_PROVIDER`、`TURNSTILE_SITE_KEY`、`ADMIN_EMAILS`、`EMAIL_FROM`、`*_PRODUCTS`、`GOOGLE_CLIENT_ID`；创建资源后把 D1/KV id 写回（见下文）。
 6. **在支付商后台建商品**：每个积分包一个一次性商品、每个订阅套餐一个订阅商品，product id 写进 `WAFFO_PRODUCTS`、`DODO_PRODUCTS` 或 `STRIPE_PRODUCTS`（Stripe 填 Price ID `price_...`），例如 `{"starter":"prod_xxx","party":"prod_yyy","squad":"prod_zzz","monthly":"prod_aaa","yearly":"prod_bbb"}`。Waffo 卖订阅还要配 `WAFFO_STORE_ID`，客户门户要用；关掉订阅开关时 setup 脚本不建套餐商品。Waffo 可用 `node scripts/waffo-setup.mjs --store STO_xxx --apply` 批量创建，Dodo 可用 `node scripts/dodo-setup.mjs --apply --write-dev-vars`（加 `--webhook <url>` 同时建 webhook 并把签名密钥写进 `.dev.vars`；几个站共用一个 Dodo business 时加 `--brand <brand_id>`，商品建在这个站的品牌下，结账页显示这个站的名字和 Logo），Stripe 可用 `node scripts/stripe-setup.mjs --apply --write-dev-vars`（`--webhook` 用法相同）。页面价格只用于展示，实际收费以支付商后台为准，两边要一致。
 7. **本地验证**：`npm run typecheck && npm test && npm run test:e2e && npm run seo:check`，然后部署（`npm run deploy` 会先跑部署前体检，见下文）。
@@ -262,7 +263,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - 后台概览显示近 30 天的服务商成本、消耗积分折算的收入和估算毛利；生成列表逐条显示成本和毛利。每积分实收 = USD 已支付订单的净实收 ÷ 未回收的积分。实际扣费以服务商账单为准。
 - **视频服务商**：`VIDEO_PROVIDER` 可选 `fal`（默认）、`yir`、`nanoapi` 或 `mock`。[yir.ai](https://yir.ai/?ref=qianshuixia) 是图片视频 API 网关，启用方法：`VIDEO_PROVIDER=yir`，secret 写 `YIR_API_KEY`，模型和提示词在 `site.video.yir` 里改（`src/server/video/yir.ts`）。
   - yir 没有模板所用的角色替换模型（`wan/v2.2-14b/animate/replace`）。接入用的是 Kling 2.6 Motion Control（reference 模式：照片 + 模板源视频），模板只交付接入代码，没有用真实 key 实测（提交、状态查询和错误映射由单元测试覆盖），效果和单价要自己验证，`costCentsPerSecond: 7` 只是估算，上线前按 [yir 模型页](https://yir.ai/models) 的报价改。
-  - 两步走（可选，`site.video.yir.scene`，默认 `null`）：Motion Control 的成片背景取自用户照片。想保留源视频的场景，就先用图片模型（如 `google/nano-banana-2`）把照片里的人合成进源视频首帧，再拿合成图做动作参考。首帧图放在 `seed/templates/`，和源视频一样上传到 R2 的 `templates/`（`--content-type image/jpeg`）。合成图会传进 yir Files API，第二步用固定的 `file_id` 引用，重新提交时请求体不变。每单多一张图的费用（`scene.costCents`），用户照片也会经过图片模型的渠道。
+  - 两步走（可选，按风格配 `site.styles[].scene = { frame, prompt }`，默认 `null`；图片模型等共用参数在 `site.video.yir.sceneImage`）：Motion Control 的成片背景取自用户照片。想保留源视频的场景，就先用图片模型（如 `google/nano-banana-2`）把照片里的人合成进源视频首帧，再拿合成图做动作参考。首帧图放在 `seed/templates/`，和源视频一样上传到 R2 的 `templates/`（`--content-type image/jpeg`）。合成图会传进 yir Files API，第二步用固定的 `file_id` 引用，重新提交时请求体不变。每单多一张图的费用（`sceneImage.costCents`），用户照片也会经过图片模型的渠道。
   - 提交时用任务 id 作 `Idempotency-Key`：队列重投或 Worker 中断后重新提交，拿回的是同一个 yir 任务，不会重复计费。yir 按请求体识别同一请求，所以照片签名地址按任务创建时间生成，有效期 2 小时，重新提交时地址不变。
   - 没有用 `max_cost` 给单个任务封顶：yir 对用 URL 引用的素材拒绝 `max_cost`。Motion Control 按参考视频秒数计费，而模板源视频的时长是固定的，单价本身就有上限。整体花费建议在 yir Console 给这个 API Key 设月度额度，超出后提交返回 `YIR_SPEND_LIMIT_EXCEEDED`。
   - yir 除了官方渠道，还可能把任务路由到第三方渠道，用户照片会发给它们。`site.video.yir.routingOnly` 默认 `null`，按 API Key 的 Routing Profile 选渠道，失败时可以换渠道。填渠道 ID（如 `['official']`）后只在这些渠道里选，它们都失败时任务失败。不管选哪种，隐私政策都要列出实际经过的渠道。

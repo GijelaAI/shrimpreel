@@ -1,6 +1,6 @@
 // 结构化数据（JSON-LD）。全部由 site 配置与文案生成，上新词无需改这里。
 // 注意：不要编造 aggregateRating / review，SoftwareApplication 没有评分时拿不到星级富结果，但实体信息仍会被理解。
-import { localePath, site, type Locale } from '#/config/site'
+import { defaultStyle, localePath, site, type Locale } from '#/config/site'
 import { absoluteUrl, htmlLang } from './i18n'
 
 const ORG_ID = absoluteUrl('/#organization')
@@ -32,7 +32,7 @@ function priceOf(cents: number) {
 // 首页：组织 + 网站 + 应用（全部积分包汇总成 AggregateOffer）+ 示例视频
 export function homeJsonLd(locale: Locale, description: string, video: { name: string; description: string }) {
   const prices = site.packages.map((p) => p.priceCents)
-  const sample = site.examples.aiVersions[0]
+  const sample = defaultStyle.examples.aiVersions[0]
   return {
     '@context': 'https://schema.org',
     '@graph': [
