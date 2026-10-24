@@ -25,6 +25,12 @@ export default defineConfig({
     trace: 'on',
     screenshot: 'on',
     locale: 'en-US',
+    // 站点填了 analytics.ga4Id 时，同意横幅会挡住页面底部的按钮，接受后还会把测试访问发到真实的 GA4 媒体资源。
+    // 默认按“拒绝”预置同意状态；需要同意的用例自己改（见 attribution.spec.ts）。没配 GA4 时这一项不起作用。
+    storageState: {
+      cookies: [],
+      origins: [{ origin: BASE_URL, localStorage: [{ name: 'consent.analytics', value: 'denied' }] }],
+    },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   // Windows 下 vite 默认只监听 [::1]，显式绑定 IPv4

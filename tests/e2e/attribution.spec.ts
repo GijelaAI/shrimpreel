@@ -13,6 +13,9 @@ type Reports = {
 test('来源归因：UTM 落地后 direct 回访，注册与订单仍记在原渠道，报表与 CSV 可见', async ({ page, playwright }) => {
   const campaign = `e2e-${Date.now().toString(36)}`
   const source = `e2e${Math.random().toString(36).slice(2, 8)}`
+  // 配了 GA4 的站点要先同意统计 Cookie 才写 vt_attr；gtag.js 直接拦掉，不往真实媒体资源发数据
+  await page.addInitScript(() => localStorage.setItem('consent.analytics', 'granted'))
+  await page.route('https://www.googletagmanager.com/**', (route) => route.abort())
   const visit = page.waitForResponse((r) => r.url().endsWith('/api/t/visit') && r.request().method() === 'POST')
   await page.goto(`/?utm_source=${source}&utm_medium=launch&utm_campaign=${campaign.toUpperCase()}`)
   expect((await visit).status()).toBe(204)
