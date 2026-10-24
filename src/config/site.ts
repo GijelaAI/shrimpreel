@@ -69,6 +69,17 @@ export const site = {
       // null = 直接用用户照片做参考，背景会变成照片的背景。字段说明见下方 YirSceneConfig
       scene: null as YirSceneConfig | null,
     },
+    // NanoAPI（可选，VIDEO_PROVIDER=nanoapi）：genjutsu 模型，照片 + 源视频。
+    // mode：motion_control = 照片里的人做源视频的动作；replace_object = 把源视频里的对象换成照片里的，prompt 要写清换哪个。
+    nanoapi: {
+      model: 'genjutsu-1.0',
+      mode: 'motion_control' as 'motion_control' | 'replace_object',
+      prompt: '',
+      resolution: '480p',
+      // 成本估算（美分/秒），只用于后台毛利；实际扣费以 NanoAPI 账单为准。单价出处 https://nanoapi.ai/docs/genjutsu
+      // genjutsu-1.0：480p $0.117/s、720p $0.273/s、1080p $0.78/s。motion_control 计费秒数 = 源视频秒数四舍五入、至少 4 秒；replace_object 向上取整
+      costCentsPerSecond: 11.7,
+    },
   },
 
   durations: [

@@ -4,6 +4,18 @@ Notable changes to the template. Derived sites pick them up with `git merge` fro
 
 中文说明在每条下方。
 
+## 2026-10-25
+
+### Added: NanoAPI video provider
+
+- A third optional video provider: `VIDEO_PROVIDER=nanoapi` with the `NANOAPI_API_KEY` secret and `site.video.nanoapi` (`genjutsu-1.0`; `mode` is `motion_control` or `replace_object`, plus `prompt`, `resolution` and `costCentsPerSecond`). The default provider is unchanged.
+- NanoAPI has no idempotency key, so before creating a task the provider lists the last 3 hours of tasks and reuses the one with the same photo and source video URLs; a failed list request fails the submit instead of creating blindly. Polling every 30 seconds; the webhook (`/api/webhooks/nanoapi`) is only a "go check now" signal. Account errors (`nanoapi_invalid_api_key`, `nanoapi_insufficient_balance`, `nanoapi_account_suspended`) fire the "Video provider account" alert; the config check and "test connection" cover it.
+- Tested with a real key at 480p: one order through the dev server and a tunnel (webhook, R2 copy, actual cost, dedupe list fields). `motion_control` keeps the face and the source scene but the photo's clothes; `replace_object` keeps the source outfit but not the face. Dressing the photo first with an image model and then running `motion_control` gives "you, in costume, dancing"; the template doesn't do that step for NanoAPI. NanoAPI reads the source video with Range requests and a browser User-Agent, so keep bot challenges away from `/media/*`; cut source videos to whole seconds (`replace_object` rounds up). Details in the README under "Video providers".
+
+Upgrading a site: merge upstream. Nothing changes unless you set `VIDEO_PROVIDER=nanoapi`; then set the `NANOAPI_API_KEY` secret and review `site.video.nanoapi`. No new vars or migrations.
+
+新增第三个可选视频服务商 NanoAPI（`VIDEO_PROVIDER=nanoapi`，密钥 `NANOAPI_API_KEY`，配置 `site.video.nanoapi`：`genjutsu-1.0`，`mode` 为 `motion_control` 或 `replace_object`）。NanoAPI 创建任务没有幂等键，所以创建前先列出最近 3 小时的任务，照片和源视频地址都相同就沿用旧任务，列表查不了则提交失败而不是盲目创建。轮询间隔 30 秒，webhook（`/api/webhooks/nanoapi`）只当“该查了”的信号。账户类错误触发“视频服务商账户”告警，配置检查和测试连接已覆盖。已用真实 key 在 480p 实测：经隧道跑通一单（webhook、转存 R2、实际成本、去重列表字段）。`motion_control` 保留人脸和源视频场景，但衣服是照片里的；`replace_object` 保留服装，但人脸不像本人。先用图片模型给照片换装，再跑 `motion_control`，才能做到“本人穿戏服跳舞”，模板的 NanoAPI 接入没有做这一步。NanoAPI 用浏览器 UA 和 Range 请求读源视频，`/media/*` 前面不要加人机验证；源视频剪成整秒（`replace_object` 向上取整）。站点升级：合并 upstream；不设 `VIDEO_PROVIDER=nanoapi` 行为不变，启用时配置 `NANOAPI_API_KEY` 并检查 `site.video.nanoapi`；没有新增 vars 和迁移。
+
 ## 2026-10-24
 
 ### Fixed: dev server always uses payment test environments

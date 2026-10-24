@@ -89,7 +89,7 @@ const ALERTS_ZH: Record<AlertKind, (p: AlertParams) => { title: string; summary:
   provider_account: (p) => ({
     title: `视频服务商账户异常：${p.count} 个任务失败`,
     summary: `最近 ${span(p.windowMinutes)}有 ${p.count} 个生成任务因服务商账户问题失败（${p.detail ?? ''}），已自动退积分。不处理的话之后的任务都会失败。`,
-    hint: '按错误码处理：provider_not_configured 是没配密钥；YIR_UNAUTHORIZED 是密钥失效；YIR_INSUFFICIENT_BALANCE 到 yir 后台充值；YIR_SPEND_LIMIT_EXCEEDED 调高 API Key 的月度额度。',
+    hint: '按错误码处理：provider_not_configured 是没配密钥；YIR_UNAUTHORIZED 是密钥失效；YIR_INSUFFICIENT_BALANCE 到 yir 后台充值；YIR_SPEND_LIMIT_EXCEEDED 调高 API Key 的月度额度；nanoapi_invalid_api_key 是 NanoAPI 密钥失效；nanoapi_insufficient_balance 到 NanoAPI 后台充值；nanoapi_account_suspended 是账户被停用，联系 NanoAPI 支持。',
     path: '/admin/generations',
   }),
   job_backlog: (p) => ({

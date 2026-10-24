@@ -139,6 +139,7 @@
    - ~~#13~~ 已完成（2026-10-21）。Waffo 与 Dodo 的 sandbox e2e（`tests/sandbox`，`npm run test:sandbox`）：真实收银台和测试卡，验证成功卡只入账一次、拒付不入账；没有隧道时靠查单入账，`SANDBOX_WEBHOOK=1` 时再验证 webhook 去重和 Dodo 部分退款。默认不进 CI，说明见 `docs/payments.md`。webhook 模式已手动跑过（2026-10-21），两家 setup 脚本都支持 `--webhook-id` 改 test webhook 地址。
    - ~~#26~~ 已完成（2026-10-21）。首页可选转化区块：痛点（`problem`）和“自己拍 vs 用本站”逐行对比（`withWithout`），文案设为 `null` 就不渲染；套餐可选 `anchorPriceCents` 划线原价和“Save X%”，只能填真实卖过的价格。不加评价区块：新站没有真实评价。
    - ~~#33~~ 已完成（2026-10-21）。可选的 yir.ai 视频服务商，见下文。
+   - ~~#34~~ 已完成（2026-10-25）。可选的 NanoAPI 视频服务商，见下文。
 3. 第三批，变现：
    - ~~#6~~ 已完成（2026-10-21）。积分分批次与过期，见下文。
    - ~~#9~~ 已完成（2026-10-21）。兑换码，见下文。
@@ -166,6 +167,19 @@
   - 第一步的合成图传进 yir Files API，第二步用固定 `file_id` 引用（结果地址每次查询都重新签名，直接用会让幂等请求体变化）。`VideoStatus` 的 pending 可带 `next`，jobs.ts 按旧任务 id 抢占后写回下一步的任务。
   - 测试：`yir.test.ts` 覆盖两步的请求体、幂等键、重复推进不重复 PUT、文件未就绪、合成失败和成本合计；`jobs.test.ts` 覆盖进入下一步和并发推进只写一次。
   - 同期评估过 MiniMax H3 作为动作参考模型：中途硬切场景、动作跟不上、时长不准、最长 15 秒，不采用。
+
+**#34 NanoAPI 视频服务商**（2026-10-25）
+- 第三个可选 `VideoProvider`（`VIDEO_PROVIDER=nanoapi`，密钥 `NANOAPI_API_KEY`，配置 `site.video.nanoapi`），默认仍用 fal。用 genjutsu-1.0 的 `motion_control` 或 `replace_object`，用法见 README 的“视频服务商”。
+  - 创建任务没有幂等键，重复提交会重复扣费：创建前先列出最近 3 小时（最多 5 页）的任务，`input.image_urls` 含本任务的签名图片地址且 `input.video_url` 相同就沿用它的 id；列表查不了就按错误映射抛错，不盲目创建。
+  - webhook（`/api/webhooks/nanoapi`）同 fal、yir，只当“该查了”的信号；轮询间隔 30 秒；成片出来后立即转存 R2。`billing.charged` 作为实际成本，没有则按 `costCentsPerSecond` 估算。
+  - 没配 Key、Key 失效、余额不足、账户停用时触发“视频服务商账户”告警；doctor 和后台配置检查要求 `NANOAPI_API_KEY`；测试连接查 `/v1/balance`。
+  - 测试：`tests/unit/nanoapi.test.ts` 按 NanoAPI 文档构造响应，覆盖创建请求体、去重（命中、分页、列表失败）、错误映射、状态和成本；smoke 巡检检查未签名的回调返回 401。
+- 实测（2026-10-25，480p）：
+  - 模板完整流程跑通一单：dev server + 白名单代理 + localhost.run 隧道，`VIDEO_PROVIDER=nanoapi`。创建、webhook、轮询、转存 R2 都正常，`provider_cost_cents` 记的是实扣的 70 美分（6 秒 $0.702）。真实列表接口按 `created_after` 过滤，返回的 `input` 里有 `image_urls` 和 `video_url`，去重能匹配上。
+  - 效果：用精灵装源视频加一张普通照片测试。`motion_control` 保留人脸和场景，但衣服是照片里的；`replace_object` 保留服装，但人脸像原舞者。先用 nano-banana-2 给照片换装，再跑 `motion_control`，能做到“本人穿精灵装跳舞”。
+  - 计费：`replace_object` 向上取整（6.04 秒按 7 秒）；`billing.charged` 在任务成功时已结算。
+  - 媒体：NanoAPI 下载素材用浏览器 UA，读视频要 Range。不支持 Range 或不带扩展名的视频地址都以 `internal_error` 失败，并全额退款。
+  - 未验证：后台“测试连接”按钮没有点过（直接调 `/v1/balance` 正常）；换装这一步没有接进 NanoAPI provider。
 
 **#6 积分分批次与过期**（2026-10-21）
 

@@ -190,6 +190,17 @@ async function probeVideo(env: Env): Promise<Outcome> {
     if (!Number.isFinite(balance)) return warn('鉴权正常，但读不到余额')
     return balanceOutcome(balance, String(body?.credits?.currency ?? 'USD'), ' fal ')
   }
+  if (id === 'nanoapi') {
+    const key = cleanSecret(env.NANOAPI_API_KEY)
+    if (!key) return fail('NANOAPI_API_KEY 未配置')
+    const response = await fetch('https://api.nanoapi.ai/v1/balance', { headers: { Authorization: `Bearer ${key}` } })
+    if (response.status === 401) return fail('NANOAPI_API_KEY 无效')
+    if (!response.ok) return fail(`查询余额返回 HTTP ${response.status}`)
+    const body = (await response.json().catch(() => null)) as { data?: { available?: unknown; currency?: unknown } } | null
+    const available = Number(body?.data?.available)
+    if (!Number.isFinite(available)) return warn('鉴权正常，但读不到余额')
+    return balanceOutcome(available, String(body?.data?.currency ?? 'USD'), ' NanoAPI ')
+  }
   const key = cleanSecret(env.YIR_API_KEY)
   if (!key) return fail('YIR_API_KEY 未配置')
   const response = await fetch('https://gateway.yir.ai/v1/balance', { headers: { Authorization: `Bearer ${key}` } })

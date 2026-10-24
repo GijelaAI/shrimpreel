@@ -168,6 +168,18 @@ describe('视频服务商探测', () => {
     expect(await probe('video', { VIDEO_PROVIDER: 'yir' })).toMatchObject({ status: 'fail', message: 'YIR_API_KEY 未配置' })
   })
 
+  it('nanoapi：查 /v1/balance，余额在 data 里；401 fail，余额偏低提示', async () => {
+    const env = { VIDEO_PROVIDER: 'nanoapi', NANOAPI_API_KEY: 'nano_key_abcdefgh' }
+    const calls = stubFetch({ 'api.nanoapi.ai/v1/balance': { body: { code: 200, data: { available: '12.50', frozen: '0', currency: 'USD' } } } })
+    expect(await probe('video', env)).toMatchObject({ status: 'ok', message: '鉴权正常，余额 12.50 USD', provider: 'nanoapi' })
+    expect(calls[0]?.auth).toBe('Bearer nano_key_abcdefgh')
+    stubFetch({ 'api.nanoapi.ai': { body: { data: { available: '2.00', currency: 'USD' } } } })
+    expect((await probe('video', env)).status).toBe('warn')
+    stubFetch({ 'api.nanoapi.ai': { status: 401 } })
+    expect(await probe('video', env)).toMatchObject({ status: 'fail', message: 'NANOAPI_API_KEY 无效' })
+    expect(await probe('video', { VIDEO_PROVIDER: 'nanoapi' })).toMatchObject({ status: 'fail', message: 'NANOAPI_API_KEY 未配置' })
+  })
+
   it('上游报错里出现的密钥值被替换掉', async () => {
     const key = 'fal_secret_value_123'
     vi.stubGlobal('fetch', async () => {

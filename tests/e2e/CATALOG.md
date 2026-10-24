@@ -275,13 +275,13 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
 | --- | --- | --- | --- |
 | 真实支付商的 webhook 和退款 | 需要公网隧道和支付商后台的 webhook 地址，Waffo 退款还要等十几分钟 | 验签与映射的单元测试；sandbox e2e 无隧道时验证收银台、回跳和查单入账；webhook 模式手动跑 | 发版前按需跑 `SANDBOX_WEBHOOK=1` |
 | 真实支付商的订阅续费、扣款失败，Dodo 的取消与撤销；Stripe 的异步付款方式和 `refund.failed` | test 模式触发不了续费和扣款失败（要等一个计费周期）；Dodo 的取消要 API 密钥有 Subscriptions 写入，模板的 test 密钥还没有 | 首付、激活、当月积分、门户和 Waffo 的取消由 sandbox 订阅用例覆盖（2026-10-21 手动跑过）；续费和扣款失败有按文档构造的映射单元测试，e2e 用 mock 订阅事件走同一套入账逻辑 | 补上密钥权限后重跑 Dodo 订阅用例；Stripe 退款后又失败时积分不会自动恢复，靠人工处理；第一个热词站上线后观察第一次真实续费 |
-| 真实视频生成和 `/api/webhooks/fal`、`/api/webhooks/yir` 的成功回调 | 需要 `FAL_KEY` 或 `YIR_API_KEY`，每次调用要付费；e2e 用 mock 服务商，靠轮询完成 | yir 的提交、查询、错误映射、实际成本和两步走（合成首帧 → 动作参考）有 provider 契约单元测试（`yir.test.ts`，按 yir 文档构造响应），进入下一步的落库由 `jobs.test.ts` 覆盖；smoke 巡检检查未签名回调返回 401 | 第一个热词站选定服务商后用真实 key 跑一单 |
+| 真实视频生成和 `/api/webhooks/fal`、`/api/webhooks/yir`、`/api/webhooks/nanoapi` 的成功回调 | 需要 `FAL_KEY`、`YIR_API_KEY` 或 `NANOAPI_API_KEY`，每次调用要付费；e2e 用 mock 服务商，靠轮询完成 | yir 的提交、查询、错误映射、实际成本和两步走（合成首帧 → 动作参考）有 provider 契约单元测试（`yir.test.ts`，按 yir 文档构造响应），进入下一步的落库由 `jobs.test.ts` 覆盖；NanoAPI 的创建、去重、查询、错误映射和成本有 `nanoapi.test.ts`，2026-10-25 用真实 key 经隧道手动跑通一单（webhook、转存 R2、实际成本、列表去重字段）；smoke 巡检检查未签名回调返回 401 | fal、yir 的 webhook 回调在第一个热词站上线后观察 |
 | 真实发信与投递 | 本地 `send_email` binding 只模拟发送 | e2e 断言发件箱记录；单元测试覆盖渲染和重试 | 线上验证随第一个热词站 |
 | Google OAuth 与 One Tap 登录 | 需要真实 Google 账号，e2e 用 dev 登录 | 单元测试覆盖跳转校验、PKCE、nonce 和按 `sub` 绑定 | 线上验证随第一个热词站 |
 | Turnstile 浏览器端校验 | 需要真实站点密钥 | 服务端校验的单元测试 | 线上验证 |
 | OpenAI 图片审核的真实调用 | 需要 `OPENAI_API_KEY` | e2e 用 mock 拒绝；单元测试覆盖响应解析和失败时拒绝 | 线上验证 |
 | 运营参数在线上的生效延迟 | 本地 KV 没有边缘缓存，保存后立即生效；线上 `cacheTtl` 60 秒的实际表现要在部署后看 | 保存时直接刷新 KV；单元测试覆盖缓存读写 | 线上验证随第一个热词站 |
-| fal、yir、OpenAI 的测试连接 | 需要真实 key | `probes.test.ts` 按文档构造响应 | 第一个热词站配好 key 后在后台点一次 |
+| fal、yir、NanoAPI、OpenAI 的测试连接 | 需要真实 key | `probes.test.ts` 按文档构造响应 | 第一个热词站配好 key 后在后台点一次 |
 | 限流（`UPLOAD_LIMITER`、`GENERATE_LIMITER`、`AUTH_LIMITER`） | 要在 60 秒内打满额度；本地 binding 的计数是否和线上一致没有核实过 | 无 | 线上手工验证 |
 | Queues 真实重试与死信、Cron 真实触发 | 真实死信要重试 10 次（约 35 分钟） | 用 `/api/dev/dead-letter`、`/api/dev/sweep`、`/api/dev/health-check` 等模拟 | 无 |
 | 支付争议与拒付 | test 模式无法触发 | 不认识的事件记为 ignored（单元测试） | 遇到时再补 |

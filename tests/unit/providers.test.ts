@@ -19,10 +19,11 @@ describe('provider 选择', () => {
     expect(() => activePaymentProviderId(env({ APP_ENV: 'development', PAYMENT_PROVIDER: 'creem' }))).toThrow()
   })
 
-  it('生产环境正常选择 waffo / dodo / fal / yir', () => {
+  it('生产环境正常选择 waffo / dodo / fal / yir / nanoapi', () => {
     expect(activePaymentProviderId(env({ APP_ENV: 'production', PAYMENT_PROVIDER: 'waffo' }))).toBe('waffo')
     expect(activePaymentProviderId(env({ APP_ENV: 'production', PAYMENT_PROVIDER: 'dodo' }))).toBe('dodo')
     expect(activeVideoProviderId(env({ APP_ENV: 'production', VIDEO_PROVIDER: 'fal' }))).toBe('fal')
     expect(activeVideoProviderId(env({ APP_ENV: 'production', VIDEO_PROVIDER: 'yir' }))).toBe('yir')
+    expect(activeVideoProviderId(env({ APP_ENV: 'production', VIDEO_PROVIDER: 'nanoapi' }))).toBe('nanoapi')
   })
 })

@@ -15,7 +15,7 @@ https://github.com/user-attachments/assets/895aab94-d0c9-474e-8d90-61a6c551e536
 - 前端/SSR：TanStack Start（React 19）+ Tailwind 4，`/` 英文、`/zh` 中文
 - API：Hono（`/api/*`、`/media/*`、`/sitemap.xml`、`/robots.txt`、IndexNow key 文件），入口 `src/server.ts`
 - 支付：Waffo Pancake（默认）、Dodo Payments，均为 MoR；也可用 Stripe（你自己是商户，销售税自己处理）；`mock` 仅用于本地和 e2e
-- 视频：fal.ai queue API（默认），可选 [yir.ai](https://yir.ai/?ref=qianshuixia) 网关；`mock` 仅用于本地和 e2e。见下文“视频服务商”
+- 视频：fal.ai queue API（默认），可选 [yir.ai](https://yir.ai/?ref=qianshuixia) 网关或 [NanoAPI](https://nanoapi.ai)；`mock` 仅用于本地和 e2e。见下文“视频服务商”
 - 已具备：
   - 用户与积分：Google 登录（含 One Tap）、积分包、月付和年付订阅、积分流水、个人中心（视频/账单/设置/兑换码/邀请链接/注销/导出我的数据）；账单显示实付与退款，订单和积分流水可分页加载，每笔订单有可打印的详情页（税务发票由支付商出具）
   - 订单与生成：订单与部分/全额退款回收、生成任务队列（含死信队列）与失败退积分
@@ -129,7 +129,7 @@ npx wrangler r2 object put <name>-media/templates/<file>.mp4 --file seed/templat
 ```
 
 - `ratelimits[].namespace_id` 在同一账号内要唯一，多个站点不要共用同一组数字。
-- 密钥：`SESSION_SECRET`、`GOOGLE_CLIENT_SECRET`、`WAFFO_MERCHANT_ID`、`WAFFO_PRIVATE_KEY`、`DODO_API_KEY`、`DODO_WEBHOOK_SECRET`、`FAL_KEY`；用 Stripe 时是 `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`；按需加 `YIR_API_KEY`（`VIDEO_PROVIDER=yir`）、`OPENAI_API_KEY`（图片审核）、`TURNSTILE_SECRET_KEY`。可以逐个 `npx wrangler secret put <NAME>`，也可以用 `scripts/sync-secrets.mjs` 一次同步：
+- 密钥：`SESSION_SECRET`、`GOOGLE_CLIENT_SECRET`、`WAFFO_MERCHANT_ID`、`WAFFO_PRIVATE_KEY`、`DODO_API_KEY`、`DODO_WEBHOOK_SECRET`、`FAL_KEY`；用 Stripe 时是 `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`；按需加 `YIR_API_KEY`（`VIDEO_PROVIDER=yir`）、`NANOAPI_API_KEY`（`VIDEO_PROVIDER=nanoapi`）、`OPENAI_API_KEY`（图片审核）、`TURNSTILE_SECRET_KEY`。可以逐个 `npx wrangler secret put <NAME>`，也可以用 `scripts/sync-secrets.mjs` 一次同步：
   ```bash
   cp .dev.vars.example .dev.vars.production     # 填上线用的值；.dev.vars.* 已被 .gitignore 忽略
   node scripts/sync-secrets.mjs                 # 只出计划：新增、已存在、只在远端、同步后仍缺，不打印任何值
@@ -197,6 +197,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 | Stripe | Developers → Webhooks（或 `stripe-setup.mjs --webhook`） | `https://<domain>/api/webhooks/stripe` |
 | fal.ai | 代码自动带上 | `https://<domain>/api/webhooks/fal` |
 | yir.ai | 代码自动带上（只有 https 地址才带，本地开发靠轮询） | `https://<domain>/api/webhooks/yir` |
+| NanoAPI | 代码自动带上（只有 https 地址才带，本地开发靠轮询） | `https://<domain>/api/webhooks/nanoapi` |
 
 - **Waffo**：`WAFFO_ENVIRONMENT` 为 `test` 或 `prod`。webhook 用 Waffo 公开的 RSA 公钥验签（已内置在 `src/server/payments/waffo.ts`），无需另配密钥。`WAFFO_PRIVATE_KEY` 支持 PKCS1/PKCS8，可以写成单行带 `\n` 的形式。
   - 退款是异步的：后台发起后只拿到工单号 `TKT_`，PSP 处理完才生成 `REF_` 并推送 `refund.succeeded`，test 模式实测要等 12–22 分钟。积分在 webhook 到达时才回收。
@@ -215,7 +216,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 - **Stripe**：`STRIPE_ENVIRONMENT` 为 `test` 或 `live`，要和 Key 前缀（`sk_test_` / `sk_live_`）及 webhook 的 `livemode` 一致。`STRIPE_PRODUCTS` 把积分包和套餐映射到 Price ID。webhook 用 `STRIPE_WEBHOOK_SECRET`（`whsec_...`）验签，checkout session 和账单入账前按固定 API 版本重新取一次。
   - Stripe 不是 MoR：销售税和发票由你负责。退款没有固定期限，可多次部分退款；退款从 Stripe 余额扣，余额不足时挂起为 pending。
   - 订阅按 `invoice.paid` 入账。客户门户要先在 Settings → Billing → Customer portal 保存一次配置才能打开。受限 Key（`rk_`）需要的权限见 [docs/payments.md](docs/payments.md) 的“Stripe”。
-- **fal、yir**：webhook 只当作“该查一下了”的信号，结果总是用 `FAL_KEY` 或 `YIR_API_KEY` 重新拉取。另外每 5 分钟的 Cron 会补查卡住的任务，超过 45 分钟判失败并退积分。
+- **fal、yir、NanoAPI**：webhook 只当作“该查一下了”的信号，结果总是用 `FAL_KEY`、`YIR_API_KEY` 或 `NANOAPI_API_KEY` 重新拉取。另外每 5 分钟的 Cron 会补查卡住的任务，超过 45 分钟判失败并退积分。
 
 ## 关键设计
 
@@ -255,11 +256,11 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - 媒体走 `/media/shares/<id>/video` 和 `/media/shares/<id>/poster.jpg`，支持 Range，`Cache-Control: public, max-age=300`，所以停止分享后已打开过的访客最多还能从缓存播放 5 分钟。
   - 失效：停止分享后旧链接返回 404，再分享得到新链接；成片到期或因举报下架返回 410，封面随之删除，之后不能再分享；删除视频时封面一并删除。
   - 迁移 `0015_shares.sql` 给 `generations` 加了 `share_id`、`share_poster_key`、`shared_at`。导出我的数据包含分享链接和开启时间；功能开启时隐私政策多一节“分享的视频”。
-- **成本与毛利**：出片时把服务商成本写入 `generations.provider_cost_cents`：yir 账单已结算时记实际扣费，其余按 `site.video` 里的单价估算。
+- **成本与毛利**：出片时把服务商成本写入 `generations.provider_cost_cents`：yir、NanoAPI 账单已结算时记实际扣费，其余按 `site.video` 里的单价估算。
   - fal 按帧计费，16 帧算 1 个视频秒，480p 为 $0.04/视频秒（[价格](https://fal.ai/models/fal-ai/wan/v2.2-14b/animate/replace)）。模板源视频是 24fps，所以成片每秒 6 美分，18 秒约 $1.08。换模型、分辨率或源视频帧率时更新 `costCentsPerVideoSecond` 和 `sourceFps`。
   - 出片后才被判失败的任务（超时、管理员判失败）照样记成本；没出片的失败任务不记。mock 记 0。
   - 后台概览显示近 30 天的服务商成本、消耗积分折算的收入和估算毛利；生成列表逐条显示成本和毛利。每积分实收 = USD 已支付订单的净实收 ÷ 未回收的积分。实际扣费以服务商账单为准。
-- **视频服务商**：`VIDEO_PROVIDER` 可选 `fal`（默认）、`yir` 或 `mock`。[yir.ai](https://yir.ai/?ref=qianshuixia) 是图片视频 API 网关，启用方法：`VIDEO_PROVIDER=yir`，secret 写 `YIR_API_KEY`，模型和提示词在 `site.video.yir` 里改（`src/server/video/yir.ts`）。
+- **视频服务商**：`VIDEO_PROVIDER` 可选 `fal`（默认）、`yir`、`nanoapi` 或 `mock`。[yir.ai](https://yir.ai/?ref=qianshuixia) 是图片视频 API 网关，启用方法：`VIDEO_PROVIDER=yir`，secret 写 `YIR_API_KEY`，模型和提示词在 `site.video.yir` 里改（`src/server/video/yir.ts`）。
   - yir 没有模板所用的角色替换模型（`wan/v2.2-14b/animate/replace`）。接入用的是 Kling 2.6 Motion Control（reference 模式：照片 + 模板源视频），模板只交付接入代码，没有用真实 key 实测（提交、状态查询和错误映射由单元测试覆盖），效果和单价要自己验证，`costCentsPerSecond: 7` 只是估算，上线前按 [yir 模型页](https://yir.ai/models) 的报价改。
   - 两步走（可选，`site.video.yir.scene`，默认 `null`）：Motion Control 的成片背景取自用户照片。想保留源视频的场景，就先用图片模型（如 `google/nano-banana-2`）把照片里的人合成进源视频首帧，再拿合成图做动作参考。首帧图放在 `seed/templates/`，和源视频一样上传到 R2 的 `templates/`（`--content-type image/jpeg`）。合成图会传进 yir Files API，第二步用固定的 `file_id` 引用，重新提交时请求体不变。每单多一张图的费用（`scene.costCents`），用户照片也会经过图片模型的渠道。
   - 提交时用任务 id 作 `Idempotency-Key`：队列重投或 Worker 中断后重新提交，拿回的是同一个 yir 任务，不会重复计费。yir 按请求体识别同一请求，所以照片签名地址按任务创建时间生成，有效期 2 小时，重新提交时地址不变。
@@ -268,6 +269,10 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - 余额不足、额度用完、Key 失效或没配 Key 时，任务失败并退积分，同时触发“视频服务商账户”告警（见“监控告警”），不用等失败率攒够。
   - 上游已计费的尝试即使任务失败也会收费，钱包余额可能变成负数。成片结果在 yir 只保留 7 天，模板出片后立即转存到 R2。
   - 利益披露：本 README 里的 yir 链接是作者的推荐链接。按 yir 条款，被推荐账号注册后 6 个月内的消费，作者能拿到 yir 毛利的一部分。不想走推荐链接可以直接访问 [yir.ai](https://yir.ai)。fal 的链接不带推荐。
+  - [NanoAPI](https://nanoapi.ai)（`VIDEO_PROVIDER=nanoapi`，secret `NANOAPI_API_KEY`，配置在 `site.video.nanoapi`，代码在 `src/server/video/nanoapi.ts`）用 `genjutsu-1.0` 模型处理照片 + 模板源视频。`mode: 'motion_control'` 让照片里的人做源视频的动作；`'replace_object'` 把源视频里的对象换成照片里的，`prompt` 要写清换哪个。计费秒数是源视频时长（motion_control 四舍五入且至少 4 秒，replace_object 向上取整）乘以对应分辨率的单价（480p $0.117/s、720p $0.273/s、1080p $0.78/s，见[价格](https://nanoapi.ai/docs/genjutsu)）。2026-10-25 用真实 key 实测，480p，源视频 6 秒，每段出片要 4～7 分钟。`motion_control` 保留源视频的场景、动作和照片里的人脸，但衣服也是照片里的；`replace_object` 保留源视频的服装和场景，但人脸会往原舞者的样子靠。要让用户换上戏服，先用图片模型给照片换装，再跑 `motion_control`，模板的 NanoAPI 接入没有做这一步。`replace_object` 把 6.04 秒的视频按 7 秒计费，所以源视频要剪成整秒。
+  - NanoAPI 会自己下载照片和源视频：用浏览器 User-Agent，读视频时发 Range 请求。源视频读不了时任务以 `internal_error` 失败（全额退款），不会报 `invalid_media`。实测里，不支持 Range 的服务器和不带扩展名的签名地址都出现过这种情况。模板的 `/media/*` 路由支持 Range，地址以 `.mp4` 结尾。不要在 `/media/*` 前面加人机验证，包括 Bot Fight Mode、Under Attack 模式和 WAF 质询。本地测试不要用 Pinggy 免费隧道，它会给浏览器返回一个提示页。
+  - NanoAPI 创建任务没有幂等键，队列重投或 Worker 中断后重新提交会重复扣费。所以创建前先列出最近 3 小时的任务，照片地址和源视频地址都对得上就直接沿用那个任务（照片签名地址按任务创建时间生成，同一任务每次相同，不同任务一定不同）。列表请求失败时提交也失败（可重试的错误会重投），不会在查不了的情况下盲目创建。
+  - 没配密钥、密钥失效、余额用完或账户被停用时，任务失败并退积分，同时立即触发“视频服务商账户”告警。NanoAPI 的 Key 没有月度额度，余额要自己在 NanoAPI 控制台盯着。结果每 30 秒轮询一次（文档要求间隔不少于 15 秒）。
 - **安全**：非 GET 的 `/api/*`（webhook、CSP 报告和前端错误上报除外）要求 `Origin` 与站点同源；上传按文件头校验真实类型；上传和生成按用户限流；封禁用户会立即使会话失效；管理操作写入 `admin_audit`。
   - 登录后的 `redirect`（登录页和 Google 回调）只接受站内路径：`src/lib/redirect.ts` 拒绝反斜杠、控制字符，以及规范化后以 `//` 开头的地址，所以 `/sign-in?redirect=/\evil.com` 这类链接会落到个人中心。
   - 5xx 错误只对管理员返回 `message`；其他人只拿到错误码，详情以 `[api] <method> <path> <code>: <message>` 写入 Workers Logs。
@@ -352,7 +357,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 | --- | --- | --- |
 | 生成失败率 | 最近 1 小时完成的任务里失败 ≥ 3 个且占比 ≥ 30%（不含管理员手动失败、举报下架） | `/admin/generations` |
 | 死信 | 最近 1 小时有任务因队列消息重试耗尽被判失败 | `/admin/generations` |
-| 视频服务商账户 | 最近 1 小时有任务因没配密钥、密钥失效、yir 余额不足或 Key 月度额度用完而失败（1 个就告警） | `/admin/generations` |
+| 视频服务商账户 | 最近 1 小时有任务因没配密钥、密钥失效、yir、NanoAPI 余额不足或 Key 月度额度用完而失败（1 个就告警） | `/admin/generations` |
 | 任务积压 | 有任务创建超过 30 分钟仍未完成 | `/admin/generations` |
 | 支付回调 | 最近 24 小时有处理失败的支付回调 | `/admin/events` |
 | 付款待核对 | 最近 24 小时有 paid 回调找不到订单，或金额、币种、商品和订单不一致（订单补单或退款后不再计入） | `/admin/events` |
