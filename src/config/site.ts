@@ -65,6 +65,9 @@ export const site = {
       // 用户照片会经过哪些上游渠道。null = 按 API Key 绑定的 Routing Profile 选，失败可换渠道；
       // 填渠道 ID（如 ['official'] 只走 Kling 官方）则只在这些渠道里选，全部失败时任务失败。隐私政策要写明实际经过的渠道
       routingOnly: null as readonly string[] | null,
+      // 两步走（可选）：先用图片模型把照片里的人合成进源视频首帧，再拿合成图做动作参考，成片保留源视频的场景。
+      // null = 直接用用户照片做参考，背景会变成照片的背景。字段说明见下方 YirSceneConfig
+      scene: null as YirSceneConfig | null,
     },
   },
 
@@ -162,6 +165,17 @@ export const site = {
 
 export type DurationOption = (typeof site.durations)[number]
 export type CreditPackage = (typeof site.packages)[number]
+
+export interface YirSceneConfig {
+  // 源视频首帧图，放在 seed/templates/，和源视频一起上传到 R2 的 templates/。各时长档位从同一帧开始，共用一张
+  frame: string
+  model: string // 图片编辑模型，如 'google/nano-banana-2'
+  prompt: string // Image 1 是首帧，Image 2 是用户照片
+  resolution: string
+  aspectRatio: string // 和源视频一致，如 '9:16'
+  costCents: number // 成本估算（美分/张），只在账单还没结算时用
+  routingOnly: readonly string[] | null // 同 yir.routingOnly，照片也会经过图片模型的渠道
+}
 
 export interface SubscriptionPlan {
   id: string

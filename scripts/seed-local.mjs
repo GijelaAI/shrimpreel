@@ -1,4 +1,4 @@
-// 本地初始化：应用 D1 迁移 + 把 seed/templates/ 的模板源视频上传到本地 R2（templates/<文件名>）
+// 本地初始化：应用 D1 迁移 + 把 seed/templates/ 的模板源视频（和两步走用的首帧图）上传到本地 R2（templates/<文件名>）
 // 用法：npm run seed:local   （与 vite dev / wrangler dev 共享 .wrangler/state）
 import { execFileSync } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
@@ -12,7 +12,9 @@ const wrangler = (args) => execFileSync('npx', ['wrangler', ...args], { stdio: '
 wrangler(['d1', 'migrations', 'apply', 'DB', '--local'])
 
 const dir = join('seed', 'templates')
+const TYPES = { '.mp4': 'video/mp4', '.jpg': 'image/jpeg' }
 for (const file of readdirSync(dir)) {
-  if (!file.endsWith('.mp4')) continue
-  wrangler(['r2', 'object', 'put', `${bucket}/templates/${file}`, '--file', join(dir, file), '--content-type', 'video/mp4', '--local'])
+  const type = TYPES[file.slice(file.lastIndexOf('.'))]
+  if (!type) continue
+  wrangler(['r2', 'object', 'put', `${bucket}/templates/${file}`, '--file', join(dir, file), '--content-type', type, '--local'])
 }

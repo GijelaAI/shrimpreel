@@ -176,6 +176,24 @@ describe('yir provider：查询', () => {
     expect(await provider.status('job_1', {})).toMatchObject({ state: 'failed', code: 'yir_no_video' })
   })
 
+  it('两步走的视频任务：成本 = 合成图 + 视频，合成图账单当时没结算就按配置估算', async () => {
+    const routes = {
+      '/v1/jobs/job_v/status?wait=0': () => json(200, { id: 'job_v', status: 'succeeded' }),
+      '/v1/jobs/job_v': () =>
+        json(200, {
+          id: 'job_v',
+          status: 'succeeded',
+          result: { availability: 'available', files: [{ url: 'https://cdn.yir.ai/out.mp4', media_type: 'video/mp4' }] },
+          billing: { status: 'settled', total_charged_by_yir: '0.66' },
+        }),
+    }
+    await withScene(async () => {
+      stubFetch(routes)
+      expect(await createYirProvider(env()).status('job_v', { stage: 'video', sceneCostCents: 1 })).toMatchObject({ costCents: 67 })
+      expect(await createYirProvider(env()).status('job_v', { stage: 'video' })).toMatchObject({ costCents: 68 })
+    })
+  })
+
   it('查询出错：Job 不存在不可重试，网关故障和限流可重试', async () => {
     const provider = createYirProvider(env())
     stubFetch({ '/v1/jobs/job_1/status?wait=0': () => yirError(404, 'YIR_JOB_NOT_FOUND', false) })
@@ -184,5 +202,126 @@ describe('yir provider：查询', () => {
     expect(await provider.status('job_1', {}).catch((e: unknown) => e)).toMatchObject({ retryable: true })
     stubFetch({ '/v1/jobs/job_1/status?wait=0': () => new Response('', { status: 503 }) })
     expect(await provider.status('job_1', {}).catch((e: unknown) => e)).toMatchObject({ code: 'yir_status_503', retryable: true })
+  })
+})
+
+const SCENE = {
+  frame: 'neon-scene.jpg',
+  model: 'google/nano-banana-2',
+  prompt: 'Put the person from Image 2 into Image 1.',
+  resolution: '1K',
+  aspectRatio: '9:16',
+  costCents: 2,
+  routingOnly: null,
+}
+
+async function withScene(run: () => Promise<void>) {
+  const yir = site.video.yir as { scene: typeof SCENE | null }
+  yir.scene = SCENE
+  try {
+    await run()
+  } finally {
+    yir.scene = null
+  }
+}
+
+describe('yir provider：两步走（先合成首帧，再做动作参考）', () => {
+  const sceneJob = (status: string, extra: object = {}) => () => json(200, { id: 'job_s', status, error: null, ...extra })
+  const sceneDone = {
+    '/v1/jobs/job_s/status?wait=0': sceneJob('succeeded'),
+    '/v1/jobs/job_s': sceneJob('succeeded', {
+      result: { availability: 'available', files: [{ url: 'https://cdn.yir.ai/scene.jpeg?sig=1', media_type: 'image/jpeg' }] },
+      billing: { status: 'settled', total_charged_by_yir: '0.012' },
+    }),
+    '/scene.jpeg?sig=1': () => new Response(new Uint8Array(1234)),
+  }
+  const meta = { stage: 'scene', generationId: 'gen_1', durationSeconds: 12, sourceVideoUrl: input().sourceVideoUrl, webhookUrl: input().webhookUrl }
+
+  it('第一步提交图片任务：首帧和照片作为两张参考图，幂等键从任务 id 推出，meta 记下第二步要用的参数', async () => {
+    await withScene(async () => {
+      const calls = stubFetch({ '/v1/images/generations': () => json(202, { id: 'job_s', status: 'queued' }) })
+      expect(await createYirProvider(env()).submit(input())).toEqual({ requestId: 'job_s', meta })
+      expect(calls[0]!.init!.headers).toMatchObject({ 'Idempotency-Key': 'gen_1:scene' })
+      expect(JSON.parse(String(calls[0]!.init!.body))).toMatchObject({
+        model: 'google/nano-banana-2',
+        input: {
+          type: 'image',
+          references: [
+            { role: 'reference_image', url: 'https://moonhop.ai/media/templates/neon-scene.jpg' },
+            { role: 'reference_image', url: input().imageUrl },
+          ],
+        },
+        parameters: { resolution: '1K', aspect_ratio: '9:16', n: 1 },
+        webhook_url: input().webhookUrl,
+      })
+    })
+  })
+
+  it('合成图出来后传进 Files API，用 file_id 提交视频任务并进入下一步；重复推进时请求体不变，不会重复计费', async () => {
+    await withScene(async () => {
+      const upload = (status: string) => () => json(200, { files: [{ id: 'file_1', status, upload: { parts: [{ url: 'https://r2.example/put' }] } }] })
+      const routes = (planStatus: string) => ({
+        ...sceneDone,
+        '/v1/files': upload(planStatus),
+        '/put': () => new Response(null, { status: 200 }),
+        '/v1/files/file_1/complete': () => json(200, { id: 'file_1', status: 'processing' }),
+        '/v1/files/file_1': () => json(200, { id: 'file_1', status: 'ready' }),
+        '/v1/videos/generations': () => json(202, { id: 'job_v', status: 'queued' }),
+      })
+      const first = stubFetch(routes('pending_upload'))
+      const expected = { state: 'pending', next: { requestId: 'job_v', meta: { stage: 'video', sceneCostCents: 1 } } }
+      expect(await createYirProvider(env()).status('job_s', meta)).toEqual(expected)
+      const plan = first.find((c) => c.url.endsWith('/v1/files'))!
+      expect(plan.init!.headers).toMatchObject({ 'Idempotency-Key': 'gen_1:scene-file' })
+      expect(JSON.parse(String(plan.init!.body))).toEqual({ files: [{ name: 'scene-gen_1.jpg', media_type: 'image/jpeg', size: 1234 }] })
+      expect(first.find((c) => c.url === 'https://r2.example/put')!.init!.method).toBe('PUT')
+      const video = first.find((c) => c.url.endsWith('/v1/videos/generations'))!
+      expect(video.init!.headers).toMatchObject({ 'Idempotency-Key': 'gen_1' })
+      expect(JSON.parse(String(video.init!.body)).input.references).toEqual([
+        { role: 'reference_image', file_id: 'file_1' },
+        { role: 'reference_video', url: input().sourceVideoUrl },
+      ])
+
+      // webhook 和定时轮询同时推进：文件已经传完就不再 PUT，视频任务的请求体和幂等键与第一次完全一致
+      const again = stubFetch(routes('ready'))
+      expect(await createYirProvider(env()).status('job_s', meta)).toEqual(expected)
+      expect(again.some((c) => c.url === 'https://r2.example/put')).toBe(false)
+      const videoAgain = again.find((c) => c.url.endsWith('/v1/videos/generations'))!
+      expect(videoAgain.init!.body).toBe(video.init!.body)
+    })
+  })
+
+  it('合成图文件还没就绪：继续等，不提交视频任务', async () => {
+    await withScene(async () => {
+      const calls = stubFetch({
+        ...sceneDone,
+        '/v1/files': () => json(200, { files: [{ id: 'file_1', status: 'processing' }] }),
+        '/v1/files/file_1': () => json(200, { id: 'file_1', status: 'processing' }),
+      })
+      expect(await createYirProvider(env()).status('job_s', meta)).toEqual({ state: 'pending' })
+      expect(calls.some((c) => c.url.includes('/videos/generations'))).toBe(false)
+    })
+  })
+
+  it('合成失败：任务失败（退积分），错误码原样保留；合成图过了保留期也判失败', async () => {
+    await withScene(async () => {
+      stubFetch({
+        '/v1/jobs/job_s/status?wait=0': sceneJob('failed', {
+          error: { code: 'YIR_CONTENT_REJECTED', message: 'Content rejected', retryable: false, action: 'modify_input' },
+        }),
+      })
+      expect(await createYirProvider(env()).status('job_s', meta)).toMatchObject({ state: 'failed', code: 'YIR_CONTENT_REJECTED', retryable: false })
+      stubFetch({
+        '/v1/jobs/job_s/status?wait=0': sceneJob('succeeded'),
+        '/v1/jobs/job_s': sceneJob('succeeded', { result: { availability: 'expired', files: [] } }),
+      })
+      expect(await createYirProvider(env()).status('job_s', meta)).toMatchObject({ state: 'failed', code: 'yir_no_scene' })
+    })
+  })
+
+  it('估算成本加上一张合成图', async () => {
+    await withScene(async () => {
+      expect(createYirProvider(env()).costCents(12)).toBe(Math.round(12 * site.video.yir.costCentsPerSecond) + 2)
+    })
   })
 })

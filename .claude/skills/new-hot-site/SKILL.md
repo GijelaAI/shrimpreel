@@ -70,7 +70,7 @@ node scripts/new-site.mjs --keyword "<关键词>" --domain <域名> --keywords "
 - 有用户提供的授权素材：放进 `public/demo/`（同名替换）、`seed/templates/<template.id>-<秒数>s.mp4`、`public/og.png`（1200×630）、`public/favicon.svg`，并在 `site.examples.*.credit` 写来源。
 - 没有：运行 `node scripts/generate-placeholder-media.mjs`（需要 ffmpeg）生成原创占位素材，文件名按新的 `template.id` 和品牌名生成。然后在 `site.ts` 的 `template` 旁写 `// TODO(site): 换成真实的趋势源视频（seed/templates/）`、在 `examples` 旁写 `// TODO(site): 换成授权的展示素材并写 credit`。
 - 没有 ffmpeg：把 `seed/templates/` 里的旧文件按新文件名复制一份，同样写上面两条 TODO。
-- 最后 `git rm` 掉 `seed/templates/` 里旧 `template.id` 的源视频，只留 `site.durations[].source` 用到的文件。
+- 最后 `git rm` 掉 `seed/templates/` 里旧 `template.id` 的源视频，只留 `site.durations[].source` 和 `site.video.yir.scene.frame` 用到的文件。
 - 不要从网上下载趋势视频当素材，版权和肖像权都过不去。
 
 ### 6. wrangler vars 先不动

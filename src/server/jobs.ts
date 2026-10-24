@@ -179,7 +179,18 @@ async function pollGeneration(env: Env, generation: GenerationRow) {
       await failGeneration(env, generation.id, 'timeout', 'Generation timed out')
       return
     }
-    await env.DB.prepare('UPDATE generations SET updated_at = ? WHERE id = ?').bind(nowIso(), generation.id).run()
+    if (status.next) {
+      // webhook 和定时轮询可能同时推进到下一步：服务商端靠幂等键只建一个任务，这里按旧任务 id 抢占，只写一次
+      const advanced = await env.DB.prepare(
+        `UPDATE generations SET provider_request_id = ?, provider_meta = ?, updated_at = ?
+         WHERE id = ? AND status = 'processing' AND provider_request_id = ?`,
+      )
+        .bind(status.next.requestId, JSON.stringify(status.next.meta), nowIso(), generation.id, generation.provider_request_id)
+        .run()
+      if (!advanced.meta.changes) return
+    } else {
+      await env.DB.prepare('UPDATE generations SET updated_at = ? WHERE id = ?').bind(nowIso(), generation.id).run()
+    }
     await enqueueJob(env, { kind: 'poll', generationId: generation.id }, POLL_DELAY_SECONDS[provider.id])
     return
   }

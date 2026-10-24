@@ -14,7 +14,8 @@ export interface VideoSubmitResult {
 }
 
 export type VideoStatus =
-  | { state: 'pending' }
+  // next：多步任务进入下一步，jobs.ts 把它写回 provider_request_id / provider_meta，之后轮询新的服务商任务
+  | { state: 'pending'; next?: VideoSubmitResult }
   // costCents：服务商返回了已结算的实际费用时带上，否则用 costCents() 估算
   | { state: 'completed'; output: { url: string } | { r2Key: string }; costCents?: number }
   | { state: 'failed'; code: string; message: string; retryable?: boolean }

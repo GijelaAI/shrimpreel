@@ -36,7 +36,7 @@ https://github.com/user-attachments/assets/895aab94-d0c9-474e-8d90-61a6c551e536
 ```bash
 npm install
 cp .dev.vars.example .dev.vars       # 至少填 SESSION_SECRET
-npm run seed:local                   # 应用 D1 迁移 + 把 seed/templates/*.mp4 上传到本地 R2
+npm run seed:local                   # 应用 D1 迁移 + 把 seed/templates/ 的 mp4 和 jpg 上传到本地 R2
 npm run dev -- --host 127.0.0.1      # http://127.0.0.1:3000
 ```
 
@@ -260,6 +260,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - 后台概览显示近 30 天的服务商成本、消耗积分折算的收入和估算毛利；生成列表逐条显示成本和毛利。每积分实收 = USD 已支付订单的净实收 ÷ 未回收的积分。实际扣费以服务商账单为准。
 - **视频服务商**：`VIDEO_PROVIDER` 可选 `fal`（默认）、`yir` 或 `mock`。[yir.ai](https://yir.ai/?ref=qianshuixia) 是图片视频 API 网关，启用方法：`VIDEO_PROVIDER=yir`，secret 写 `YIR_API_KEY`，模型和提示词在 `site.video.yir` 里改（`src/server/video/yir.ts`）。
   - yir 没有模板所用的角色替换模型（`wan/v2.2-14b/animate/replace`）。接入用的是 Kling 2.6 Motion Control（reference 模式：照片 + 模板源视频），模板只交付接入代码，没有用真实 key 实测（提交、状态查询和错误映射由单元测试覆盖），效果和单价要自己验证，`costCentsPerSecond: 7` 只是估算，上线前按 [yir 模型页](https://yir.ai/models) 的报价改。
+  - 两步走（可选，`site.video.yir.scene`，默认 `null`）：Motion Control 的成片背景取自用户照片。想保留源视频的场景，就先用图片模型（如 `google/nano-banana-2`）把照片里的人合成进源视频首帧，再拿合成图做动作参考。首帧图放在 `seed/templates/`，和源视频一样上传到 R2 的 `templates/`（`--content-type image/jpeg`）。合成图会传进 yir Files API，第二步用固定的 `file_id` 引用，重新提交时请求体不变。每单多一张图的费用（`scene.costCents`），用户照片也会经过图片模型的渠道。
   - 提交时用任务 id 作 `Idempotency-Key`：队列重投或 Worker 中断后重新提交，拿回的是同一个 yir 任务，不会重复计费。yir 按请求体识别同一请求，所以照片签名地址按任务创建时间生成，有效期 2 小时，重新提交时地址不变。
   - 没有用 `max_cost` 给单个任务封顶：yir 对用 URL 引用的素材拒绝 `max_cost`。Motion Control 按参考视频秒数计费，而模板源视频的时长是固定的，单价本身就有上限。整体花费建议在 yir Console 给这个 API Key 设月度额度，超出后提交返回 `YIR_SPEND_LIMIT_EXCEEDED`。
   - yir 除了官方渠道，还可能把任务路由到第三方渠道，用户照片会发给它们。`site.video.yir.routingOnly` 默认 `null`，按 API Key 的 Routing Profile 选渠道，失败时可以换渠道。填渠道 ID（如 `['official']`）后只在这些渠道里选，它们都失败时任务失败。不管选哪种，隐私政策都要列出实际经过的渠道。

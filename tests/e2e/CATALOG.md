@@ -275,7 +275,7 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
 | --- | --- | --- | --- |
 | 真实支付商的 webhook 和退款 | 需要公网隧道和支付商后台的 webhook 地址，Waffo 退款还要等十几分钟 | 验签与映射的单元测试；sandbox e2e 无隧道时验证收银台、回跳和查单入账；webhook 模式手动跑 | 发版前按需跑 `SANDBOX_WEBHOOK=1` |
 | 真实支付商的订阅续费、扣款失败，Dodo 的取消与撤销；Stripe 的异步付款方式和 `refund.failed` | test 模式触发不了续费和扣款失败（要等一个计费周期）；Dodo 的取消要 API 密钥有 Subscriptions 写入，模板的 test 密钥还没有 | 首付、激活、当月积分、门户和 Waffo 的取消由 sandbox 订阅用例覆盖（2026-10-21 手动跑过）；续费和扣款失败有按文档构造的映射单元测试，e2e 用 mock 订阅事件走同一套入账逻辑 | 补上密钥权限后重跑 Dodo 订阅用例；Stripe 退款后又失败时积分不会自动恢复，靠人工处理；第一个热词站上线后观察第一次真实续费 |
-| 真实视频生成和 `/api/webhooks/fal`、`/api/webhooks/yir` 的成功回调 | 需要 `FAL_KEY` 或 `YIR_API_KEY`，每次调用要付费；e2e 用 mock 服务商，靠轮询完成 | yir 的提交、查询、错误映射和实际成本有 provider 契约单元测试（`yir.test.ts`，按 yir 文档构造响应）；smoke 巡检检查未签名回调返回 401 | 第一个热词站选定服务商后用真实 key 跑一单 |
+| 真实视频生成和 `/api/webhooks/fal`、`/api/webhooks/yir` 的成功回调 | 需要 `FAL_KEY` 或 `YIR_API_KEY`，每次调用要付费；e2e 用 mock 服务商，靠轮询完成 | yir 的提交、查询、错误映射、实际成本和两步走（合成首帧 → 动作参考）有 provider 契约单元测试（`yir.test.ts`，按 yir 文档构造响应），进入下一步的落库由 `jobs.test.ts` 覆盖；smoke 巡检检查未签名回调返回 401 | 第一个热词站选定服务商后用真实 key 跑一单 |
 | 真实发信与投递 | 本地 `send_email` binding 只模拟发送 | e2e 断言发件箱记录；单元测试覆盖渲染和重试 | 线上验证随第一个热词站 |
 | Google OAuth 与 One Tap 登录 | 需要真实 Google 账号，e2e 用 dev 登录 | 单元测试覆盖跳转校验、PKCE、nonce 和按 `sub` 绑定 | 线上验证随第一个热词站 |
 | Turnstile 浏览器端校验 | 需要真实站点密钥 | 服务端校验的单元测试 | 线上验证 |

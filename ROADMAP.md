@@ -162,6 +162,10 @@
   - `routing.only` 默认不限定（`routingOnly: null`，按 Key 的 Routing Profile 选，可故障切换）：Kling Motion Control 在 yir 上有哪些渠道还没确认，锁死渠道后无法切换。需要限定时填渠道 ID，隐私政策列出实际渠道。
 - 未验证（2026-10-21 决定模板不做实测，只交付功能）：没有用真实 key 跑过；Motion Control 的效果、单价（`costCentsPerSecond: 7` 是估算）和结算时机，由选用 yir 的热词站自己用 3–5 条真实素材验证。
 - README 里的 yir 链接是作者的推荐链接，已在 README 中披露；代码和默认配置不带推荐标识。
+- 2026-10-24 补充两步走（`site.video.yir.scene`，默认关闭）：Christmas Dance AI 实测发现 Motion Control 的成片背景取自用户照片，和“跳源视频里的舞”不符。先用图片模型把人合成进源视频首帧，再做动作参考，背景和动作都对上了（6 秒约 $0.012 + $0.33）。
+  - 第一步的合成图传进 yir Files API，第二步用固定 `file_id` 引用（结果地址每次查询都重新签名，直接用会让幂等请求体变化）。`VideoStatus` 的 pending 可带 `next`，jobs.ts 按旧任务 id 抢占后写回下一步的任务。
+  - 测试：`yir.test.ts` 覆盖两步的请求体、幂等键、重复推进不重复 PUT、文件未就绪、合成失败和成本合计；`jobs.test.ts` 覆盖进入下一步和并发推进只写一次。
+  - 同期评估过 MiniMax H3 作为动作参考模型：中途硬切场景、动作跟不上、时长不准、最长 15 秒，不采用。
 
 **#6 积分分批次与过期**（2026-10-21）
 
