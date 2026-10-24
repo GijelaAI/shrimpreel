@@ -7,6 +7,9 @@ WAFFO_PRIVATE_KEY=
 # Dodo Payments（可选）
 DODO_API_KEY=
 DODO_WEBHOOK_SECRET=
+# Stripe（可选；sk_test_ 或 rk_test_ 开头的 test Key，webhook 签名密钥 whsec_）
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
 # fal.ai 视频生成
 FAL_KEY=
 # yir.ai 视频网关（VIDEO_PROVIDER=yir 时必填）

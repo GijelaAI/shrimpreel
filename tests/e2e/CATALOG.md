@@ -230,7 +230,7 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
 
 ## 支付商 sandbox（tests/sandbox）
 
-`SANDBOX_PROVIDER=dodo|waffo npm run test:sandbox` 用 `.dev.vars` 里的 test 凭据走真实收银台和测试卡，默认不进 CI（用法见 `docs/payments.md` 的“sandbox e2e”）。没有公网隧道时靠结果页的主动查单入账；设 `SANDBOX_WEBHOOK=1` 时还会等 webhook 到达，并跑依赖 webhook 的退款和订阅用例。
+`SANDBOX_PROVIDER=dodo|waffo|stripe npm run test:sandbox` 用 `.dev.vars` 里的 test 凭据走真实收银台和测试卡，默认不进 CI（用法见 `docs/payments.md` 的“sandbox e2e”）。没有公网隧道时靠结果页的主动查单入账；设 `SANDBOX_WEBHOOK=1` 时还会等 webhook 到达，并跑依赖 webhook 的退款和订阅用例。
 
 - `dodo.spec.ts` › `测试卡付款：跳回结果页显示到账，积分只入账一次，再次查单不重复入账`
 - `dodo.spec.ts` › `拒付卡：不加积分，查单不会把失败的付款当成到账；有 webhook 时订单转 failed`
@@ -241,20 +241,26 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
 - `waffo.spec.ts` › `拒付卡：Waffo 显示付款失败，查单不会把失败的付款当成到账，订单留在 pending`
 - `waffo.spec.ts` › `订阅：月付走真实收银台，webhook 激活订阅并发当月积分；门户地址可打开，取消续费后 Waffo 回 canceling`（仅 `SANDBOX_WEBHOOK=1`）
   - 首付事件是 `subscription.payment_succeeded`，只入账一次；状态事件校正周期后，当月积分的到期时间仍等于当期结束；`canResume` 为 false（撤销只能在门户里）；取消后收到 `subscription.canceling`，积分不变。
+- `stripe.spec.ts` › `测试卡付款：跳回结果页显示到账，积分只入账一次，再次查单不重复入账`
+  - 用 `4000 0000 0000 0077`（直接进可用余额），后面的退款不会挂起；`provider_payment_id` 是 `pi_`，查单和 webhook 只入账一次。
+- `stripe.spec.ts` › `拒付卡：收银台提示被拒、留在收银台，不加积分，查单不会把失败的付款当成到账`
+- `stripe.spec.ts` › `部分退款：退款 webhook 到达后按比例回收积分，订单仍是 paid；重放同一退款不重复回收`（仅 `SANDBOX_WEBHOOK=1`）
+- `stripe.spec.ts` › `订阅：月付走真实收银台，invoice.paid 建订阅并发当月积分；取消续费和撤销同步到 Stripe，门户地址可打开，最后取消续费`（仅 `SANDBOX_WEBHOOK=1`）
+  - 首付只按 `invoice.paid` 入账一次；当月积分的到期时间等于当期结束；门户要先在 Stripe 后台保存配置。
 - Waffo 退款不进用例：退款异步（12–22 分钟），每笔支付只能退一次。
 
 ## 只由单元测试覆盖
 
 这些逻辑依赖外部服务或需要穷举边界，放在 `tests/unit`：
 
-- 支付商对接：Waffo、Dodo 的验签（篡改、重放、时间窗、test/live 不符、密钥轮换）、事件映射和查单（`waffo.test.ts`、`dodo.test.ts`）。
+- 支付商对接：Waffo、Dodo、Stripe 的验签（篡改、重放、时间窗、test/live 不符、密钥轮换）、事件映射和查单（`waffo.test.ts`、`dodo.test.ts`、`stripe.test.ts`）。Stripe 另测验签后按固定 API 版本重取对象、折扣与少付、订阅首付以 `invoice.paid` 为准、退款按 `re_` 幂等。
 - 退款规则：比例与四舍五入、按币种换算、退款单号格式、各支付商的退款期限、金额与商品核对（`refunds.test.ts`）。
 - 积分账务：先到期先扣、余额不足整体回滚、明细原路退回、Cron 作废幂等、退款先扣该订单的批次、迁移前的旧余额与旧任务，每步核对流水之和 = 缓存余额 = 批次剩余之和（`credits.test.ts`，在 `node:sqlite` 上执行全部迁移）。
 - 兑换码：码的生成、展示与输入规范化；兑换后的批次与有效期，重复、用完、停用、截止的错误码；预检查之后状态变化（并发用完、刚被停用）由 batch 内断言兜底（`redeem.test.ts`）。
 - 邀请奖励：邀请码规范化、IP 加盐哈希（IPv6 按 /64）；邀请人被封禁或注销、30 天奖励上限（已回收的也计入）；同一被邀请人两单并发入账只发一次、两笔退款并发只回收一次、邀请人已花掉的最多扣到 0（`referrals.test.ts`）。
-- 订阅：日历月相加（月末、闰年）、年付补发窗口与跳过已过期的月份；首付、续费订单号派生、续费金额核对、逾期恢复；首付不带周期时状态事件校正周期，当期积分的到期时间一起对齐；状态事件按发生时间防乱序、到期取消且当期结束后不再算有效订阅；退款只回收订阅批次并停止补发；Dodo、Waffo 订阅事件的映射（`subscriptions.test.ts`）。
+- 订阅：日历月相加（月末、闰年）、年付补发窗口与跳过已过期的月份；首付、续费订单号派生、续费金额核对、逾期恢复；首付不带周期时状态事件校正周期，当期积分的到期时间一起对齐；状态事件按发生时间防乱序、到期取消且当期结束后不再算有效订阅；退款只回收订阅批次并停止补发；Dodo、Waffo 订阅事件的映射（`subscriptions.test.ts`；Stripe 的在 `stripe.test.ts`）。
 - 运营参数：提交校验（未知字段、越界、类型、长度）与公告规范化、存值合并时丢弃非法值、KV 缓存未命中读 D1 并回写、坏 JSON 行忽略；每日上限按 UTC 自然日计数、超出时整个 batch 回滚；邀请奖励暂停期间付款的首单记为 `paused`，恢复后第二单不补发（`settings.test.ts`、`referrals.test.ts`）。
-- 测试连接：Dodo 逐个套餐核对商品与价格（低于 site.ts 为失败、高于或币种不同为提示）、Key 无效与商品不存在；fal 和 yir 的余额与权限分支；R2、KV 不留探测数据；说明文字里的密钥值被替换（`probes.test.ts`）。Dodo、Waffo 的探测另用 test 凭据实测过一次。
+- 测试连接：Dodo、Stripe 逐个套餐核对商品与价格（低于 site.ts 为失败、高于或币种不同为提示）、Key 无效与商品不存在；fal 和 yir 的余额与权限分支；R2、KV 不留探测数据；说明文字里的密钥值被替换（`probes.test.ts`）。Dodo、Waffo 的探测另用 test 凭据实测过一次。
 - 第三方校验：Turnstile 的启用与失败分支，OpenAI 审核接口异常时拒绝（fail closed）（`compliance.test.ts`）。
 - 发信重试：临时错误退避、永久错误不重试，邮件头注入（`email.test.ts`）。
 - 生产开关：生产和预发拒绝 mock（`providers.test.ts`）、弱 `SESSION_SECRET`（`security.test.ts`）、上线配置与 doctor（`config-health.test.ts`）、预发配置与 robots（`staging.test.ts`）。
@@ -268,7 +274,7 @@ e2e 跑在本地 dev server 上，支付、视频、审核服务商都是 mock�
 | 风险 | 为什么没有 e2e | 现有保障 | 计划 |
 | --- | --- | --- | --- |
 | 真实支付商的 webhook 和退款 | 需要公网隧道和支付商后台的 webhook 地址，Waffo 退款还要等十几分钟 | 验签与映射的单元测试；sandbox e2e 无隧道时验证收银台、回跳和查单入账；webhook 模式手动跑 | 发版前按需跑 `SANDBOX_WEBHOOK=1` |
-| 真实支付商的订阅续费、扣款失败，Dodo 的取消与撤销 | test 模式触发不了续费和扣款失败（要等一个计费周期）；Dodo 的取消要 API 密钥有 Subscriptions 写入，模板的 test 密钥还没有 | 首付、激活、当月积分、门户和 Waffo 的取消由 sandbox 订阅用例覆盖（2026-10-21 手动跑过）；续费和扣款失败有按文档构造的映射单元测试，e2e 用 mock 订阅事件走同一套入账逻辑 | 补上密钥权限后重跑 Dodo 订阅用例；第一个热词站上线后观察第一次真实续费 |
+| 真实支付商的订阅续费、扣款失败，Dodo 的取消与撤销；Stripe 的异步付款方式和 `refund.failed` | test 模式触发不了续费和扣款失败（要等一个计费周期）；Dodo 的取消要 API 密钥有 Subscriptions 写入，模板的 test 密钥还没有 | 首付、激活、当月积分、门户和 Waffo 的取消由 sandbox 订阅用例覆盖（2026-10-21 手动跑过）；续费和扣款失败有按文档构造的映射单元测试，e2e 用 mock 订阅事件走同一套入账逻辑 | 补上密钥权限后重跑 Dodo 订阅用例；Stripe 退款后又失败时积分不会自动恢复，靠人工处理；第一个热词站上线后观察第一次真实续费 |
 | 真实视频生成和 `/api/webhooks/fal`、`/api/webhooks/yir` 的成功回调 | 需要 `FAL_KEY` 或 `YIR_API_KEY`，每次调用要付费；e2e 用 mock 服务商，靠轮询完成 | yir 的提交、查询、错误映射和实际成本有 provider 契约单元测试（`yir.test.ts`，按 yir 文档构造响应）；smoke 巡检检查未签名回调返回 401 | 第一个热词站选定服务商后用真实 key 跑一单 |
 | 真实发信与投递 | 本地 `send_email` binding 只模拟发送 | e2e 断言发件箱记录；单元测试覆盖渲染和重试 | 线上验证随第一个热词站 |
 | Google OAuth 与 One Tap 登录 | 需要真实 Google 账号，e2e 用 dev 登录 | 单元测试覆盖跳转校验、PKCE、nonce 和按 `sub` 绑定 | 线上验证随第一个热词站 |

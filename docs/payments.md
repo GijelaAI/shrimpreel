@@ -1,6 +1,6 @@
 # 支付商接入
 
-模板内置 Waffo Pancake 和 Dodo Payments，本地和 e2e 用 `mock`。本文说明支付商代码要遵守的约定，以及新增一个支付商要改哪些地方。各支付商的后台配置和实测行为见 README 的“第三方回调地址”。
+模板内置 Waffo Pancake、Dodo Payments 和 Stripe，本地和 e2e 用 `mock`。本文说明支付商代码要遵守的约定，以及新增一个支付商要改哪些地方。各支付商的后台配置和实测行为见 README 的“第三方回调地址”。
 
 ## 数据流
 
@@ -49,20 +49,20 @@
 - 退款只回收这张订单发过的订阅积分：回收量 = 已发放积分 × 退款比例，不碰积分包。当期订单退款后不再补发。退款不会取消订阅，要停止续费需另外取消。
 - 不支持：换套餐（升降级），请在支付商的客户门户里关掉换套餐；试用期；暂停订阅（Dodo 的 paused 状态不处理）。
 
-两家支付商的差异：
+各支付商的差异：
 
-| | Dodo | Waffo |
-| --- | --- | --- |
-| 扣款事件 | `payment.succeeded`，带 `subscription_id` 和 `service_periods`（本次覆盖的周期） | `subscription.payment_succeeded`，不带周期：先按付款时间推算，状态事件到达后校正周期，当期积分的到期时间跟着对齐。Waffo 的周期只到日期（`T00:00:00Z`） |
-| 状态事件 | `subscription.active`、`renewed`、`on_hold`、`past_due`、`failed`、`cancelled`、`expired`、`updated`、`plan_changed` | `subscription.activated`、`renewed`、`recovered`、`past_due`、`canceling`、`uncanceled`、`canceled` |
-| 取消续费 | API 设 `cancel_at_next_billing_date` | API 取消：active 到当期结束才终止，past_due 立即终止 |
-| 撤销取消 | API | 只能由买家在客户门户里操作（商户 API Key 调不了），账单页会引导去门户 |
-| 客户门户 | 按订阅的客户 ID 现取地址 | 需要 `WAFFO_STORE_ID` |
-| API 权限 | 运行时要 Subscriptions 写入（取消、撤销）、Customers 写入（门户），没有客户 ID 时还要 Subscriptions 读取 | 商户 API Key 即可 |
+| | Dodo | Waffo | Stripe |
+| --- | --- | --- | --- |
+| 扣款事件 | `payment.succeeded`，带 `subscription_id` 和 `service_periods`（本次覆盖的周期） | `subscription.payment_succeeded`，不带周期：先按付款时间推算，状态事件到达后校正周期，当期积分的到期时间跟着对齐。Waffo 的周期只到日期（`T00:00:00Z`） | `invoice.paid`（首付和续费都是），周期取账单行的 `period`。subscription 模式的 `checkout.session.completed` 不入账，避免和首张账单重复 |
+| 状态事件 | `subscription.active`、`renewed`、`on_hold`、`past_due`、`failed`、`cancelled`、`expired`、`updated`、`plan_changed` | `subscription.activated`、`renewed`、`recovered`、`past_due`、`canceling`、`uncanceled`、`canceled` | `customer.subscription.created`、`updated`、`deleted`，按对象里的 `status` 映射（`unpaid` 算 past_due，`incomplete`、`paused` 不改状态） |
+| 取消续费 | API 设 `cancel_at_next_billing_date` | API 取消：active 到当期结束才终止，past_due 立即终止 | API 设 `cancel_at_period_end`；门户里按日期取消（`cancel_at`）也算到期取消 |
+| 撤销取消 | API | 只能由买家在客户门户里操作（商户 API Key 调不了），账单页会引导去门户 | API |
+| 客户门户 | 按订阅的客户 ID 现取地址 | 需要 `WAFFO_STORE_ID` | 按客户 ID 现取地址；要先在 Stripe 后台 Settings → Billing → Customer portal 保存一次配置 |
+| API 权限 | 运行时要 Subscriptions 写入（取消、撤销）、Customers 写入（门户），没有客户 ID 时还要 Subscriptions 读取 | 商户 API Key 即可 | secret key 即可；用受限 Key（`rk_`）时见下面的“Stripe” |
 
-`scripts/dodo-setup.mjs` 和 `scripts/waffo-setup.mjs` 会为每个订阅套餐建商品，并把订阅事件加进 webhook 订阅列表。Dodo 的订阅商品 `subscription_period_count` 设为 10 年，也就是最多自动续费 10 年。
+`scripts/dodo-setup.mjs`、`scripts/waffo-setup.mjs` 和 `scripts/stripe-setup.mjs` 会为每个订阅套餐建商品，并把订阅事件加进 webhook 订阅列表。Dodo 的订阅商品 `subscription_period_count` 设为 10 年，也就是最多自动续费 10 年。
 
-test 模式实测（2026-10-21，webhook 模式）：Waffo 月付首付、订阅激活、当月积分、门户地址、取消续费后回 `subscription.canceling` 全部通过；Dodo 首付、激活、积分和门户地址通过，取消续费因 test API Key 缺 Subscriptions 写入返回 403，还没验证。test 模式触发不了续费和扣款失败，这两条只由单元测试和 mock e2e 覆盖。
+test 模式实测（2026-10-21，webhook 模式）：Waffo 月付首付、订阅激活、当月积分、门户地址、取消续费后回 `subscription.canceling` 全部通过；Dodo 首付、激活、积分和门户地址通过，取消续费因 test API Key 缺 Subscriptions 写入返回 403，还没验证。Stripe 沙盒 2026-10-24 实测：4 个用例在有 webhook 时全部通过，订阅状态事件可能先于 `invoice.paid` 到达，此时 `customer.subscription.created` 记为 ignored，后续的 `updated` 会补上状态。test 模式触发不了续费和扣款失败，这两条只由单元测试和 mock e2e 覆盖。
 
 ## webhook 返回码
 
@@ -80,6 +80,16 @@ test 模式实测（2026-10-21，webhook 模式）：Waffo 月付首付、订阅
 
 `payment_events` 里已有 `failed` 记录的事件，重新投递时会再处理一次，其他状态的直接返回 `duplicate`。
 
+## Stripe
+
+- API 请求固定 `Stripe-Version`（`STRIPE_API_VERSION`，见 `src/server/payments/stripe.ts`）。webhook payload 的版本由 webhook 端点决定，可能和账户默认版本不同，所以 `checkout.session.*` 和 `invoice.paid` 验签后先用固定版本重新取对象（展开 `line_items`、`payments`）再归一化；取不到时返回 502，Stripe 会重试。查单走同一套归一化。
+- `STRIPE_PRODUCTS` 存的是 Price ID（`price_...`）。积分包用一次性价格，订阅套餐用 recurring 价格，后台“测试连接”会逐个核对。
+- 验签：`Stripe-Signature` 里的 `v1` 是 `HMAC-SHA256(whsec_..., "<t>.<原始请求体>")` 的 hex，容差 5 分钟，轮换密钥期间多个 `v1` 任一匹配即可。payload 的 `livemode` 必须和 `STRIPE_ENVIRONMENT` 一致，上线检查还会核对 Key 前缀（`sk_test_` / `sk_live_`）。
+- webhook 要订阅的事件：`checkout.session.completed`、`checkout.session.async_payment_succeeded`、`checkout.session.async_payment_failed`、`checkout.session.expired`、`refund.created`、`refund.updated`；开了订阅再加 `invoice.paid`、`customer.subscription.created`、`customer.subscription.updated`、`customer.subscription.deleted`。`scripts/stripe-setup.mjs --webhook <url>` 会按这个列表建端点。
+- 受限 Key（`rk_`）运行时需要的权限：Checkout Sessions 写、Invoices 读、Prices 读（测试连接）、Refunds 写、Subscriptions 写、Customer portal 写。
+- 退款没有固定期限，可多次部分退款。退款从 Stripe 余额扣，余额不足时挂起为 pending，等变成 succeeded 再回收积分。退款之后又失败（`refund.failed`）时积分已回收，不会自动恢复，需要人工处理。
+- 异步付款方式（银行转账等）在 `checkout.session.completed` 时还是 unpaid，等 `async_payment_succeeded` 才入账。
+
 ## sandbox e2e
 
 `tests/sandbox` 用支付商的 test 模式走真实收银台和测试卡，验证 mock 覆盖不到的部分：下单参数、收银台流程、回跳地址和查单入账。需要凭据和网络，结果受支付商影响，所以默认不进 CI，改支付商代码或发版前手动跑。
@@ -87,27 +97,28 @@ test 模式实测（2026-10-21，webhook 模式）：Waffo 月付首付、订阅
 ```bash
 SANDBOX_PROVIDER=dodo E2E_PORT=3200 npm run test:sandbox
 SANDBOX_PROVIDER=waffo E2E_PORT=3200 npm run test:sandbox
+SANDBOX_PROVIDER=stripe E2E_PORT=3200 npm run test:sandbox
 ```
 
 - 前提：`.dev.vars` 里有这家支付商的 test 凭据和 `*_PRODUCTS`（至少有 `starter`）。不用改 `PAYMENT_PROVIDER`：配置文件启动 dev server 时，用 `SANDBOX_PAYMENT_PROVIDER` 和 `SANDBOX_SITE_URL` 覆盖这两个变量（见 `vite.config.ts`），只对 dev server 生效。
 - 端口：配置文件总是自己启动 dev server，端口被占用时直接报错，避免连到跑着 mock 的 server。默认 3000，被占用时用 `E2E_PORT` 换一个。
 - 工件：报告、trace 和截图在 `.tmp/sandbox-e2e/<provider>/`。
 - 没有公网隧道时，webhook 到不了本机，入账靠结果页第 15 秒的主动查单。用例会检查查单入账只发生一次、拒付不会被当成到账。
-- 有隧道时设 `SANDBOX_WEBHOOK=1`：用例还会等 webhook 到达，检查 webhook 和查单只入账一次，并运行 Dodo 的部分退款用例和两家的订阅用例。准备步骤：
+- 有隧道时设 `SANDBOX_WEBHOOK=1`：用例还会等 webhook 到达，检查 webhook 和查单只入账一次，并运行 Dodo、Stripe 的部分退款用例和订阅用例。准备步骤：
   1. `node scripts/webhook-proxy.mjs --port 3100 --target http://127.0.0.1:3200`，再用隧道（如 Pinggy）指向 3100。
-  2. 把支付商后台的 test webhook 地址改成 `https://<隧道域名>/api/webhooks/<provider>`：`node scripts/dodo-setup.mjs --apply --webhook <url> --webhook-id <id>` 或 `node scripts/waffo-setup.mjs --store STO_xxx --apply --webhook <url> --webhook-id <id>`，签名密钥不变，也可以在后台修改。
+  2. 把支付商后台的 test webhook 地址改成 `https://<隧道域名>/api/webhooks/<provider>`：`node scripts/dodo-setup.mjs --apply --webhook <url> --webhook-id <id>` 、`node scripts/waffo-setup.mjs --store STO_xxx --apply --webhook <url> --webhook-id <id>` 或 `node scripts/stripe-setup.mjs --apply --webhook <url> --webhook-id we_xxx`，签名密钥不变，也可以在后台修改。
   3. 跑完把 webhook 地址改回去，否则支付商会一直重试发往已失效的隧道。
-- 订阅用例（仅 `SANDBOX_WEBHOOK=1`）：用月付走真实收银台，等 webhook 激活订阅，检查当月积分的到期时间等于当期结束、门户地址能打开，最后取消续费。Dodo 还会先取消再撤销，需要 key 有 Subscriptions 写入。中途失败时 test 订阅会一直续费，要在账单页或支付商后台手动取消。只跑订阅用例加 `--grep 订阅`，跳过加 `--grep-invert 订阅`。
+- 订阅用例（仅 `SANDBOX_WEBHOOK=1`）：用月付走真实收银台，等 webhook 激活订阅，检查当月积分的到期时间等于当期结束、门户地址能打开，最后取消续费。Dodo 和 Stripe 还会先取消再撤销，需要 key 有 Subscriptions 写入。中途失败时 test 订阅会一直续费，要在账单页或支付商后台手动取消。只跑订阅用例加 `--grep 订阅`，跳过加 `--grep-invert 订阅`。
 
 测试卡与已知行为：
 
-| | Dodo | Waffo |
-| --- | --- | --- |
-| 成功卡 | `4242 4242 4242 4242`，`06/32`，CVC `123` | `4576 7500 0000 0110`，`12/30`，CVC `123` |
-| 拒付卡 | `4000 0000 0000 0002` | `4576 7500 0000 0220` |
-| 回跳 | 成功或失败都跳回 `return_url` | 付款成功后停在 Waffo 结果页（订阅显示 “Subscription successful”），点 Done 才跳回；拒付停在 Waffo 失败页，不跳回 |
-| 拒付后的订单 | 有 webhook 时转 failed，没有时保持 pending | 保持 pending（本站不处理 Waffo 的失败事件） |
-| 退款 | 用例退 330 美分。从商户钱包扣，付款后约 4–5 分钟才入账，余额不足时返回 409，用例会跳过，稍后重跑 | 不进用例：异步（实测 12–22 分钟），每笔支付只能退一次 |
+| | Dodo | Waffo | Stripe |
+| --- | --- | --- | --- |
+| 成功卡 | `4242 4242 4242 4242`，`06/32`，CVC `123` | `4576 7500 0000 0110`，`12/30`，CVC `123` | `4242 4242 4242 4242`；积分包用例用 `4000 0000 0000 0077`（直接进可用余额，退款不会挂起）。任意未来日期和 CVC |
+| 拒付卡 | `4000 0000 0000 0002` | `4576 7500 0000 0220` | `4000 0000 0000 0002` |
+| 回跳 | 成功或失败都跳回 `return_url` | 付款成功后停在 Waffo 结果页（订阅显示 “Subscription successful”），点 Done 才跳回；拒付停在 Waffo 失败页，不跳回 | 成功跳回 `success_url`；拒付停在收银台提示被拒，可以换卡重试 |
+| 拒付后的订单 | 有 webhook 时转 failed，没有时保持 pending | 保持 pending（本站不处理 Waffo 的失败事件） | 保持 pending（session 仍可付款，24 小时后 `checkout.session.expired` 或超时取消） |
+| 退款 | 用例退 330 美分。从商户钱包扣，付款后约 4–5 分钟才入账，余额不足时返回 409，用例会跳过，稍后重跑 | 不进用例：异步（实测 12–22 分钟），每笔支付只能退一次 | 用例退 330 美分，`refund.created` 或 `refund.updated`（succeeded）到达后回收 |
 
 收银台是第三方页面，改版后选择器会失效。失败时先看 trace 和截图，再改 `tests/sandbox/<provider>.spec.ts` 里的付款函数。
 
@@ -115,7 +126,7 @@ SANDBOX_PROVIDER=waffo E2E_PORT=3200 npm run test:sandbox
 
 以 `foo` 为例：
 
-1. `src/server/payments/foo.ts`：实现 `createFooProvider(env)`、`verifyFooWebhook`、`normalizeFooEvent`。参考 `dodo.ts`（使用 Standard Webhooks 规范）或 `waffo.ts`（RSA 签名，用 GraphQL 查单）。
+1. `src/server/payments/foo.ts`：实现 `createFooProvider(env)`、`verifyFooWebhook`、`normalizeFooEvent`。参考 `dodo.ts`（使用 Standard Webhooks 规范）、`waffo.ts`（RSA 签名，用 GraphQL 查单）或 `stripe.ts`（webhook 验签后按固定 API 版本重取对象）。
 2. `src/server/payments/types.ts`：在 `PaymentProviderId` 里加 `'foo'`。
 3. `src/server/payments/index.ts`：在 `activePaymentProviderId`、`getOrderProvider`、`getPaymentProvider` 里都加上分支。漏掉 `getOrderProvider` 的话，切换支付商后旧订单就不能退款和查单了。
 4. `src/server/app.ts`：添加 `POST /api/webhooks/foo`。先用 `c.req.text()` 读原始请求体并验签，再调用 `processPaymentEvent(c.env, 'foo', normalizeFooEvent(payload), raw)`。`/api/webhooks/*` 已经豁免了 CSRF 同源校验。

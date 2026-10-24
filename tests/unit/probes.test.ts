@@ -30,6 +30,26 @@ const dodoPrice = (prices: Record<string, number>, currency = 'USD') => (url: st
   return { body: { product_id: `pdt_${packId}`, price: { price: prices[packId] ?? ITEMS.find((p) => p.id === packId)!.priceCents, currency } } }
 }
 
+// Stripe 的 Price：订阅套餐是 recurring（周期同 site.plans），积分包是 one_time
+const STRIPE_KEY = 'sk_test_probe_1234567890'
+const STRIPE_PRODUCTS = JSON.stringify(Object.fromEntries(ITEMS.map((pack) => [pack.id, `price_${pack.id}`])))
+const stripePrice = (override: Record<string, Record<string, unknown>> = {}) => (url: string) => {
+  const packId = decodeURIComponent(url.split('/v1/prices/')[1]!).replace('price_', '')
+  const item = ITEMS.find((p) => p.id === packId)!
+  const plan = site.plans.find((p) => p.id === packId)
+  return {
+    body: {
+      id: `price_${packId}`,
+      active: true,
+      unit_amount: item.priceCents,
+      currency: item.currency.toLowerCase(),
+      type: plan ? 'recurring' : 'one_time',
+      recurring: plan ? { interval: plan.interval, interval_count: 1 } : null,
+      ...override[packId],
+    },
+  }
+}
+
 const probe = (target: Parameters<typeof runProbe>[1], env: Record<string, unknown>) => runProbe(env as unknown as Env, target, admin)
 
 afterEach(() => {
@@ -75,6 +95,45 @@ describe('支付探测', () => {
     expect(result.message).toContain(`${first!.id}：DODO_PRODUCTS 里没有商品 ID`)
     expect(result.message).toContain(`商品 pdt_${rest[0]!.id} 不存在`)
     expect(await probe('payment', { PAYMENT_PROVIDER: 'dodo', DODO_PRODUCTS })).toMatchObject({ status: 'fail', message: 'DODO_API_KEY 未配置' })
+  })
+
+  it('Stripe：每个 Price 的金额、币种、类型和周期一致时 ok，只读 GET Price 接口，带固定 API 版本', async () => {
+    const calls = stubFetch({ '/v1/prices/': stripePrice() })
+    const result = await probe('payment', { PAYMENT_PROVIDER: 'stripe', STRIPE_SECRET_KEY: STRIPE_KEY, STRIPE_PRODUCTS })
+    expect(result).toMatchObject({ target: 'payment', provider: 'stripe', status: 'ok' })
+    expect(calls.map((c) => c.url)).toEqual(ITEMS.map((pack) => `https://api.stripe.com/v1/prices/price_${pack.id}`))
+    expect(calls.every((c) => c.auth === `Bearer ${STRIPE_KEY}`)).toBe(true)
+  })
+
+  it('Stripe：售价偏低、Price 停用、积分包配了订阅价、订阅周期不对都是 fail；高于只提示；401/403 说明里不带 Key', async () => {
+    const stripe = { PAYMENT_PROVIDER: 'stripe', STRIPE_SECRET_KEY: STRIPE_KEY, STRIPE_PRODUCTS }
+    const [cheap, inactive, wrongType] = site.packages
+    const yearly = site.plans.find((p) => p.interval === 'year')!
+    stubFetch({
+      '/v1/prices/': stripePrice({
+        [cheap!.id]: { unit_amount: cheap!.priceCents - 1 },
+        [inactive!.id]: { active: false },
+        [wrongType!.id]: { type: 'recurring', recurring: { interval: 'month' } },
+        [yearly.id]: { recurring: { interval: 'month', interval_count: 1 } },
+      }),
+    })
+    const result = await probe('payment', stripe)
+    expect(result.status).toBe('fail')
+    expect(result.message).toContain(`${cheap!.id}：Stripe 售价 ${cheap!.priceCents - 1} 低于`)
+    expect(result.message).toContain(`${inactive!.id}：Price price_${inactive!.id} 已停用`)
+    expect(result.message).toContain(`${wrongType!.id}：积分包要用一次性价格`)
+    expect(result.message).toContain(`${yearly.id}：Price 的扣款周期不是每年一次`)
+
+    stubFetch({ '/v1/prices/': stripePrice({ [cheap!.id]: { unit_amount: cheap!.priceCents + 100 } }) })
+    expect(await probe('payment', stripe)).toMatchObject({ status: 'warn' })
+
+    for (const status of [401, 403]) {
+      stubFetch({ '/v1/prices/': { status, body: { error: { message: `Invalid API Key provided: ${STRIPE_KEY}` } } } })
+      const denied = await probe('payment', stripe)
+      expect(denied.status).toBe('fail')
+      expect(denied.message).not.toContain(STRIPE_KEY)
+    }
+    expect(await probe('payment', { PAYMENT_PROVIDER: 'stripe', STRIPE_PRODUCTS })).toMatchObject({ status: 'fail', message: 'STRIPE_SECRET_KEY 未配置' })
   })
 
   it('mock 不调用外部接口；生产环境配了 mock 时报 fail 而不是抛错', async () => {

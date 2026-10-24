@@ -32,6 +32,9 @@
     // test 店铺的商品 id，与 .dev.vars 中的值相同
     "WAFFO_PRODUCTS": "{}",
     "DODO_PRODUCTS": "{}",
+    // Stripe：test | live，要和 STRIPE_SECRET_KEY 的模式一致；STRIPE_PRODUCTS 存 Price ID（price_...），scripts/stripe-setup.mjs 可以生成
+    "STRIPE_ENVIRONMENT": "test",
+    "STRIPE_PRODUCTS": "{}",
     "GOOGLE_CLIENT_ID": "",
     "TURNSTILE_SITE_KEY": "",
     // 有 OPENAI_API_KEY 后改为 openai

@@ -167,7 +167,7 @@ export function checkPaidEvent(
 }
 
 function providerProducts(env: Env, provider: PaymentProviderId) {
-  return parseJsonRecord(provider === 'dodo' ? env.DODO_PRODUCTS : provider === 'waffo' ? env.WAFFO_PRODUCTS : undefined)
+  return parseJsonRecord(provider === 'dodo' ? env.DODO_PRODUCTS : provider === 'waffo' ? env.WAFFO_PRODUCTS : provider === 'stripe' ? env.STRIPE_PRODUCTS : undefined)
 }
 
 function expectedProductId(env: Env, provider: PaymentProviderId, packageId: string) {
@@ -530,19 +530,21 @@ async function batchWithOptional(db: D1Database, statements: D1PreparedStatement
 
 // 后台"仅记账"退款的幂等键（与退款 webhook 共用 order_refund:<orderId>:<key>）：
 // - mock 订单没有退款单号，由当前已退金额派生：并发连点拿到同一个键不会重复扣，下一笔部分退款又能拿到新键
-// - 真实支付商订单必须填支付商退款单号（Dodo refund_id / Waffo REF_），webhook 迟到时不会重复回收积分
+// - 真实支付商订单必须填支付商退款单号（Dodo refund_id / Waffo REF_ / Stripe re_），webhook 迟到时不会重复回收积分
 // - Waffo 的 webhook 用 REF_ 退款单号；误填 TKT_ 工单号会和迟到的 webhook 各扣一次
 export function localRefundKey(order: Pick<OrderRow, 'provider' | 'refunded_amount_cents'>, refundId: string | undefined, amountCents: number) {
   const id = refundId?.trim()
   if (order.provider === 'mock') return id || `admin:${order.refunded_amount_cents}:${amountCents}`
   if (!id) throw new ApiError(400, 'refund_id_required')
   if (order.provider === 'waffo' && !id.startsWith('REF_')) throw new ApiError(400, 'invalid_refund_id')
+  if (order.provider === 'stripe' && !id.startsWith('re_')) throw new ApiError(400, 'invalid_refund_id')
   return id
 }
 
 // 支付商退款规则，超出后 API 直接拒绝；提前拦截给出明确错误码：
 // - Waffo：支付后 14 天内，每笔支付只能有一次退款（可部分），第二次返回 409。已退过还要再退只能线下处理，再用"仅记账"补登
 // - Dodo：支付后 30 天内，可多次部分退款（同一时间只能有一笔处理中）https://docs.dodopayments.com/features/transactions/refunds
+// - Stripe：没有固定期限，可多次部分退款；从 Stripe 余额扣，余额不足时挂起为 pending，等 succeeded 的 webhook 再回收积分 https://docs.stripe.com/refunds
 const REFUND_WINDOW_DAYS: Record<string, number> = { waffo: 14, dodo: 30 }
 export function assertProviderRefundAllowed(order: Pick<OrderRow, 'provider' | 'refunded_amount_cents' | 'paid_at'>, now = Date.now()) {
   if (order.provider === 'waffo' && order.refunded_amount_cents > 0) throw new ApiError(409, 'waffo_refund_exists')

@@ -1,9 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
 
 // 支付商 sandbox e2e：真实 test 模式收银台和测试卡，需要 .dev.vars 里的 test 凭据，默认不进 CI。
-// 用法见 docs/payments.md 的“sandbox e2e”。一次只跑一家：SANDBOX_PROVIDER=dodo|waffo npm run test:sandbox
+// 用法见 docs/payments.md 的“sandbox e2e”。一次只跑一家：SANDBOX_PROVIDER=dodo|waffo|stripe npm run test:sandbox
 const PROVIDER = process.env.SANDBOX_PROVIDER
-if (PROVIDER !== 'dodo' && PROVIDER !== 'waffo') throw new Error('设置 SANDBOX_PROVIDER=dodo 或 SANDBOX_PROVIDER=waffo')
+if (PROVIDER !== 'dodo' && PROVIDER !== 'waffo' && PROVIDER !== 'stripe') throw new Error('设置 SANDBOX_PROVIDER=dodo、waffo 或 stripe')
 
 const ARTIFACTS = `.tmp/sandbox-e2e/${PROVIDER}`
 const PORT = process.env.E2E_PORT ?? '3000'

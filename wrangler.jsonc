@@ -15,7 +15,7 @@
   "vars": {
     "APP_ENV": "development",
     "SITE_URL": "http://localhost:3000",
-    // waffo | dodo | mock（mock 只允许非 production）
+    // waffo | dodo | stripe | mock（mock 只允许非 production）
     "PAYMENT_PROVIDER": "mock",
     // fal | yir | mock（mock 只允许非 production）
     "VIDEO_PROVIDER": "mock",
@@ -30,6 +30,9 @@
     // 每个积分包、订阅套餐对应支付商的 product id（JSON：{"starter":"PROD_xxx","monthly":"PROD_yyy",...}）
     "WAFFO_PRODUCTS": "{}",
     "DODO_PRODUCTS": "{}",
+    // Stripe：test | live，要和 STRIPE_SECRET_KEY 的模式一致；STRIPE_PRODUCTS 存 Price ID（price_...），scripts/stripe-setup.mjs 可以生成
+    "STRIPE_ENVIRONMENT": "test",
+    "STRIPE_PRODUCTS": "{}",
     "GOOGLE_CLIENT_ID": "",
     // Cloudflare Turnstile 站点密钥（公开）；留空 = 不启用。启用时必须同时 `wrangler secret put TURNSTILE_SECRET_KEY`
     "TURNSTILE_SITE_KEY": "",

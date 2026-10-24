@@ -48,14 +48,14 @@ async function refund(order: AdminOrder, mode: 'provider' | 'local') {
   }
   const hint =
     mode === 'provider'
-      ? `将调用 ${order.provider} 退款 API 实际退钱，积分在退款 webhook 到达后按金额比例回收。\nWaffo 每笔支付只能退款一次（14 天内）；Dodo 30 天内可多次部分退款，从商户钱包余额扣，余额不足会被拒。`
+      ? `将调用 ${order.provider} 退款 API 实际退钱，积分在退款 webhook 到达后按金额比例回收。\nWaffo 每笔支付只能退款一次（14 天内）；Dodo 30 天内可多次部分退款，从商户钱包余额扣，余额不足会被拒；Stripe 可多次部分退款，余额不足时挂起到余额够了再退。`
       : '仅本地记账并按比例回收积分，不会调用支付商（用于已在支付商后台退款但 webhook 丢失的情况）。'
   const note = promptNote(`${hint}\n请输入原因：`)
   if (!note) return false
   let refundId: string | null = null
   if (mode === 'local' && order.provider !== 'mock') {
     // 与退款 webhook 共用幂等键，webhook 迟到也不会重复回收积分
-    refundId = promptNote(`请填写支付商退款单号（Waffo 为 REF_ 开头，不是 TKT_ 工单号；Dodo 为 refund_id）：`)
+    refundId = promptNote(`请填写支付商退款单号（Waffo 为 REF_ 开头，不是 TKT_ 工单号；Dodo 为 refund_id；Stripe 为 re_ 开头）：`)
     if (!refundId) return false
   }
   if (!(await adminAction(`/api/admin/orders/${order.id}/refund`, { note, amountCents, mode, refundId }))) return false

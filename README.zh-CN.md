@@ -14,7 +14,7 @@ https://github.com/user-attachments/assets/895aab94-d0c9-474e-8d90-61a6c551e536
 
 - 前端/SSR：TanStack Start（React 19）+ Tailwind 4，`/` 英文、`/zh` 中文
 - API：Hono（`/api/*`、`/media/*`、`/sitemap.xml`、`/robots.txt`、IndexNow key 文件），入口 `src/server.ts`
-- 支付：Waffo Pancake（默认）、Dodo Payments，均为 MoR；`mock` 仅用于本地和 e2e
+- 支付：Waffo Pancake（默认）、Dodo Payments，均为 MoR；也可用 Stripe（你自己是商户，销售税自己处理）；`mock` 仅用于本地和 e2e
 - 视频：fal.ai queue API（默认），可选 [yir.ai](https://yir.ai/?ref=qianshuixia) 网关；`mock` 仅用于本地和 e2e。见下文“视频服务商”
 - 已具备：
   - 用户与积分：Google 登录（含 One Tap）、积分包、月付和年付订阅、积分流水、个人中心（视频/账单/设置/兑换码/邀请链接/注销/导出我的数据）；账单显示实付与退款，订单和积分流水可分页加载，每笔订单有可打印的详情页（税务发票由支付商出具）
@@ -29,7 +29,7 @@ https://github.com/user-attachments/assets/895aab94-d0c9-474e-8d90-61a6c551e536
   - 运维与安全：后台免部署切换维护模式、全站公告和每日生成上限；健康检查告警邮件、付款即时通知（Telegram、飞书、Discord 等）、D1 每日备份到 R2、前端错误上报到 Workers 日志、CSP（Report-Only，每次请求一个 nonce）与 Permissions-Policy
   - 内容与 SEO：one-page 首页（How it works / What is 区块，可选的痛点和“自己拍 vs 用本站”对比区块）、可扩展的文章集合（`/guides` 列表页、相关文章）、法律页、联系表单；SSR 输出完整的 canonical、hreflang、JSON-LD 和 sitemap；文案按语言拆包；`npm run seo:check` 检查全站
 
-功能建议与后续规划见 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 和 [ROADMAP.md](ROADMAP.md)。SEO 规则、关键词规划和审计结果见 [docs/SEO_AUDIT.md](docs/SEO_AUDIT.md)。全部环境变量和 `site.ts` 上线字段见 [docs/env.md](docs/env.md)，新增支付商的步骤与 webhook 返回码约定见 [docs/payments.md](docs/payments.md)，订阅的开关、套餐和支付商配置见 [docs/subscriptions.md](docs/subscriptions.md)，改代码前的约定（积分、支付入账、双语文案、迁移、e2e）见 [AGENTS.md](AGENTS.md)。
+更新日志见 [CHANGELOG.md](CHANGELOG.md)。功能建议与后续规划见 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 和 [ROADMAP.md](ROADMAP.md)。SEO 规则、关键词规划和审计结果见 [docs/SEO_AUDIT.md](docs/SEO_AUDIT.md)。全部环境变量和 `site.ts` 上线字段见 [docs/env.md](docs/env.md)，新增支付商的步骤与 webhook 返回码约定见 [docs/payments.md](docs/payments.md)，订阅的开关、套餐和支付商配置见 [docs/subscriptions.md](docs/subscriptions.md)，改代码前的约定（积分、支付入账、双语文案、迁移、e2e）见 [AGENTS.md](AGENTS.md)。
 
 ## 本地开发
 
@@ -85,7 +85,7 @@ npm run dev -- --host 127.0.0.1      # http://127.0.0.1:3000
    - `public/og.png`、`public/favicon.svg`。
    - `node scripts/generate-placeholder-media.mjs`（需要 ffmpeg）按 `site.durations` 的文件名和品牌名重新生成原创占位素材。之后删掉 `seed/templates/` 里旧 `template.id` 的文件。
 5. **改 `wrangler.jsonc` 的 `vars`**：`SITE_URL`、`APP_ENV=production`、`PAYMENT_PROVIDER`、`VIDEO_PROVIDER`、`MODERATION_PROVIDER`、`TURNSTILE_SITE_KEY`、`ADMIN_EMAILS`、`EMAIL_FROM`、`*_PRODUCTS`、`GOOGLE_CLIENT_ID`；创建资源后把 D1/KV id 写回（见下文）。
-6. **在支付商后台建商品**：每个积分包一个一次性商品、每个订阅套餐一个订阅商品，product id 写进 `WAFFO_PRODUCTS` 或 `DODO_PRODUCTS`，例如 `{"starter":"prod_xxx","party":"prod_yyy","squad":"prod_zzz","monthly":"prod_aaa","yearly":"prod_bbb"}`。Waffo 卖订阅还要配 `WAFFO_STORE_ID`，客户门户要用；关掉订阅开关时 setup 脚本不建套餐商品。Waffo 可用 `node scripts/waffo-setup.mjs --store STO_xxx --apply` 批量创建，Dodo 可用 `node scripts/dodo-setup.mjs --apply --write-dev-vars`（加 `--webhook <url>` 同时建 webhook 并把签名密钥写进 `.dev.vars`）。页面价格只用于展示，实际收费以支付商后台为准，两边要一致。
+6. **在支付商后台建商品**：每个积分包一个一次性商品、每个订阅套餐一个订阅商品，product id 写进 `WAFFO_PRODUCTS`、`DODO_PRODUCTS` 或 `STRIPE_PRODUCTS`（Stripe 填 Price ID `price_...`），例如 `{"starter":"prod_xxx","party":"prod_yyy","squad":"prod_zzz","monthly":"prod_aaa","yearly":"prod_bbb"}`。Waffo 卖订阅还要配 `WAFFO_STORE_ID`，客户门户要用；关掉订阅开关时 setup 脚本不建套餐商品。Waffo 可用 `node scripts/waffo-setup.mjs --store STO_xxx --apply` 批量创建，Dodo 可用 `node scripts/dodo-setup.mjs --apply --write-dev-vars`（加 `--webhook <url>` 同时建 webhook 并把签名密钥写进 `.dev.vars`），Stripe 可用 `node scripts/stripe-setup.mjs --apply --write-dev-vars`（`--webhook` 用法相同）。页面价格只用于展示，实际收费以支付商后台为准，两边要一致。
 7. **本地验证**：`npm run typecheck && npm test && npm run test:e2e && npm run seo:check`，然后部署（`npm run deploy` 会先跑部署前体检，见下文）。
 8. **上线后**：
    - 运行 `npm run seo:check -- --base https://<domain> --production`。
@@ -129,7 +129,7 @@ npx wrangler r2 object put <name>-media/templates/<file>.mp4 --file seed/templat
 ```
 
 - `ratelimits[].namespace_id` 在同一账号内要唯一，多个站点不要共用同一组数字。
-- 密钥：`SESSION_SECRET`、`GOOGLE_CLIENT_SECRET`、`WAFFO_MERCHANT_ID`、`WAFFO_PRIVATE_KEY`、`DODO_API_KEY`、`DODO_WEBHOOK_SECRET`、`FAL_KEY`；按需加 `YIR_API_KEY`（`VIDEO_PROVIDER=yir`）、`OPENAI_API_KEY`（图片审核）、`TURNSTILE_SECRET_KEY`。可以逐个 `npx wrangler secret put <NAME>`，也可以用 `scripts/sync-secrets.mjs` 一次同步：
+- 密钥：`SESSION_SECRET`、`GOOGLE_CLIENT_SECRET`、`WAFFO_MERCHANT_ID`、`WAFFO_PRIVATE_KEY`、`DODO_API_KEY`、`DODO_WEBHOOK_SECRET`、`FAL_KEY`；用 Stripe 时是 `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`；按需加 `YIR_API_KEY`（`VIDEO_PROVIDER=yir`）、`OPENAI_API_KEY`（图片审核）、`TURNSTILE_SECRET_KEY`。可以逐个 `npx wrangler secret put <NAME>`，也可以用 `scripts/sync-secrets.mjs` 一次同步：
   ```bash
   cp .dev.vars.example .dev.vars.production     # 填上线用的值；.dev.vars.* 已被 .gitignore 忽略
   node scripts/sync-secrets.mjs                 # 只出计划：新增、已存在、只在远端、同步后仍缺，不打印任何值
@@ -184,7 +184,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 ```
 
 - 除 `deploy` 外，staging 的 wrangler 命令都要带 `-c wrangler.staging.jsonc`：不带时，`deploy` 这类命令会跟随最近一次构建产物里的配置。`npm run deploy` 会先按 `wrangler.jsonc` 重新构建。
-- 下表的回调地址把 `<domain>` 换成 workers.dev 地址。Waffo 和 Dodo 只用 test 店铺。
+- 下表的回调地址把 `<domain>` 换成 workers.dev 地址。Waffo 和 Dodo 只用 test 店铺，Stripe 只用沙盒。
 
 ### 第三方回调地址
 
@@ -193,6 +193,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 | Google OAuth | Google Cloud Console → Authorized redirect URIs | `https://<domain>/api/auth/google/callback` |
 | Waffo Pancake | Dashboard → Settings → Webhooks | `https://<domain>/api/webhooks/waffo` |
 | Dodo Payments | Dashboard → Webhooks | `https://<domain>/api/webhooks/dodo` |
+| Stripe | Developers → Webhooks（或 `stripe-setup.mjs --webhook`） | `https://<domain>/api/webhooks/stripe` |
 | fal.ai | 代码自动带上 | `https://<domain>/api/webhooks/fal` |
 | yir.ai | 代码自动带上（只有 https 地址才带，本地开发靠轮询） | `https://<domain>/api/webhooks/yir` |
 
@@ -201,7 +202,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - 每笔支付只能退款一次（可部分），且须在支付后 14 天内。后台会提前拦截，错误码为 `waffo_refund_exists` / `refund_window_expired`。
   - webhook 丢失时用“仅记账”补登，必须填 `REF_` 退款单号（填 `TKT_` 会被拒绝，否则迟到的 webhook 会再扣一次）。
   - webhook 由 Upstash QStash 投递，失败重试只发往创建时填的 URL，所以必须用固定域名。
-- **本地联调真实 webhook**：`node scripts/webhook-proxy.mjs --port 3100` 只转发 `POST /api/webhooks/{waffo,dodo}`，把隧道指向它，不要直接暴露 dev server。用 sandbox e2e 自动跑一遍收银台和 webhook 的做法见 [docs/payments.md](docs/payments.md)。实测 Pinggy 可用（`ssh -p 443 -R0:127.0.0.1:3100 qr@a.pinggy.io`，免费版 60 分钟），localhost.run 经常断线。
+- **本地联调真实 webhook**：`node scripts/webhook-proxy.mjs --port 3100` 只转发 `POST /api/webhooks/{waffo,dodo,stripe}`，把隧道指向它，不要直接暴露 dev server。用 sandbox e2e 自动跑一遍收银台和 webhook 的做法见 [docs/payments.md](docs/payments.md)。实测 Pinggy 可用（`ssh -p 443 -R0:127.0.0.1:3100 qr@a.pinggy.io`，免费版 60 分钟），localhost.run 经常断线。
 - **Dodo**：`DODO_ENVIRONMENT` 为 `test` 或 `live`。webhook 按 Standard Webhooks 规范验签，`DODO_WEBHOOK_SECRET` 填控制台给的 `whsec_...`。
   - API 密钥按资源授权：`dodo-setup.mjs` 需要 Products 写入，加 `--webhook` 还要 Webhooks 写入；运行时需要 Checkout sessions 和 Refunds 写入，主动对账还要 Checkout sessions 和 Payments 读取；卖订阅还要 Subscriptions 写入（取消续费、撤销）、Customers 写入（客户门户）和 Subscriptions 读取。
   - 商户只能在支付后 30 天内退款，可分多次部分退款，但同一时间只能有一笔在处理（[文档](https://docs.dodopayments.com/features/transactions/refunds)）。超过 30 天时后台返回 `refund_window_expired`。
@@ -210,6 +211,9 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - webhook 由 Svix 投递。支付事件的 metadata（`orderId` 等）会原样回传；退款事件不带 metadata，靠 `payment_id` 反查订单。隧道换域名后用 `--webhook-id` 改 URL，签名密钥不变。
   - 支付成功或失败都会跳回 `return_url`，并追加 `payment_id`、`status`、`email`（买家邮箱）。GA4 的 `page_location` 已去掉 email。
   - 收银台显示的商户名取自 Dodo 注册信息。上 live 前在后台改成品牌名。
+- **Stripe**：`STRIPE_ENVIRONMENT` 为 `test` 或 `live`，要和 Key 前缀（`sk_test_` / `sk_live_`）及 webhook 的 `livemode` 一致。`STRIPE_PRODUCTS` 把积分包和套餐映射到 Price ID。webhook 用 `STRIPE_WEBHOOK_SECRET`（`whsec_...`）验签，checkout session 和账单入账前按固定 API 版本重新取一次。
+  - Stripe 不是 MoR：销售税和发票由你负责。退款没有固定期限，可多次部分退款；退款从 Stripe 余额扣，余额不足时挂起为 pending。
+  - 订阅按 `invoice.paid` 入账。客户门户要先在 Settings → Billing → Customer portal 保存一次配置才能打开。受限 Key（`rk_`）需要的权限见 [docs/payments.md](docs/payments.md) 的“Stripe”。
 - **fal、yir**：webhook 只当作“该查一下了”的信号，结果总是用 `FAL_KEY` 或 `YIR_API_KEY` 重新拉取。另外每 5 分钟的 Cron 会补查卡住的任务，超过 45 分钟判失败并退积分。
 
 ## 关键设计
@@ -231,7 +235,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - 维护模式：新的生成和下单返回 503 `maintenance`，前台每页顶部显示维护提示；登录、查看、下载和支付回调照常，管理员不受限制，便于维护期间验证。
   - 每日生成上限按 UTC 自然日统计创建的任务数（失败退款的也算），超出返回 429 `daily_limit`，不扣积分；并发提交由同一个 D1 batch 里的断言行兜底。0 = 不限。建议和服务商控制台的消费上限一起用。
   - 邀请奖励设为 0 即暂停邀请（隐藏卡片，链接不再绑定）。暂停期间付款的首单记为拒绝（`paused`），恢复后不会用之后的订单补发。`site.referralRewardCredits` 为 0 时这一项锁定，因为隐私政策按 `site.ts` 生成。
-  - “测试连接”逐项探测 R2、KV、发信（给你发一封测试邮件）、支付（Dodo：逐个套餐核对商品和价格与 `site.ts` 是否一致，售价更低时报失败，因为这样的付款会被判金额不符而不入账；Waffo：用不存在的订单号查单，验证签名和鉴权）、视频服务商（鉴权和余额，低于 5 美元提示）和图片审核（鉴权）。探测只读或自行清理，不建收银台、不提交任务，说明文字里的密钥值会被替换掉。
+  - “测试连接”逐项探测 R2、KV、发信（给你发一封测试邮件）、支付（Dodo、Stripe：逐个套餐核对商品或 Price 的价格与 `site.ts` 是否一致，售价更低时报失败，因为这样的付款会被判金额不符而不入账；Stripe 还核对一次性/周期价格和扣款周期；Waffo：用不存在的订单号查单，验证签名和鉴权）、视频服务商（鉴权和余额，低于 5 美元提示）和图片审核（鉴权）。探测只读或自行清理，不建收银台、不提交任务，说明文字里的密钥值会被替换掉。
 - **订阅**：默认开启，开关是 `site.subscriptionsEnabled`。模板默认月付 $14.90、年付 $149，每月都发 60 积分；开关设为 `false` 就只卖积分包，定价页、条款、退款政策和 FAQ 里的订阅文案一起隐藏，已有订阅照常续费和发积分。开关、改套餐、支付商配置和排查见使用手册 [docs/subscriptions.md](docs/subscriptions.md)。
   - 每次扣款都是一张订单。续费订单号由支付商的付款 ID 派生，重复投递只建一次；续费金额按订阅时锁定的价格核对，对不上的转人工处理。
   - 订阅积分是当月结束作废的批次（流水 reason 为 `subscription`），生成时先于长期积分扣除。年付首付只发第一个月，其余由每 5 分钟的 Cron 按月补发，重复执行不会重发。
@@ -240,9 +244,9 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   - 退款只回收这张订单发过的订阅积分，之后不再补发年付积分；退款不会取消订阅。不支持换套餐、试用期和暂停。规则和 Dodo、Waffo 的差异见 [docs/payments.md](docs/payments.md) 的“订阅”。
   - test 模式实测（webhook 模式）：Waffo 月付首付、订阅激活、当月积分、客户门户、取消续费全部通过；Dodo 首付、激活、积分和门户地址通过，取消续费和撤销要等 API 密钥补上 Subscriptions 写入后再验证。续费和扣款失败 test 模式触发不了，由单元测试和 mock e2e 覆盖。Waffo 付款事件不带周期且周期只到日期，状态事件到达后会校正周期，当期积分的到期时间跟着对齐。
 - **支付事件**：`payment_events (provider, event_id)` 唯一。重放、并发重试、退款后迟到的 paid 都只生效一次。退款按 `MIN(余额, 包内积分)` 回收，流水记录实际扣除量。
-  - paid 事件入账前和订单核对：商品要一致（Dodo 商品 ID、Waffo `productMetadata.packageId`），同币种时含税实收不得低于标价；币种不同（Dodo Adaptive Currency）或用了折扣码时不核对金额。不一致的不入账，记为 `mismatch`；找不到订单的 paid 事件记为 `orphan`（`metadata.site` 标明是共用商户号的其他站点的事件直接忽略）。两者都返回 200，并触发“付款待核对”告警：核实后在后台补单，或到支付商后台退款（退款回调到达后订单结案为已退款，不动积分）。
+  - paid 事件入账前和订单核对：商品要一致（Dodo 商品 ID、Stripe Price ID、Waffo `productMetadata.packageId`），同币种时含税实收不得低于标价；币种不同（Dodo Adaptive Currency）或用了折扣码时不核对金额。不一致的不入账，记为 `mismatch`；找不到订单的 paid 事件记为 `orphan`（`metadata.site` 标明是共用商户号的其他站点的事件直接忽略）。两者都返回 200，并触发“付款待核对”告警：核实后在后台补单，或到支付商后台退款（退款回调到达后订单结案为已退款，不动积分）。
   - 退款事件先于付款事件到达（付款回调还在重试）时记为失败并返回 5xx，等付款入账后由支付商重试。
-  - webhook 丢失或迟到时主动向支付商查单（`src/server/reconcile.ts`；Dodo 查 checkout session 再取 payment，Waffo 用 GraphQL `payments` 按商户订单号查）：成功页在约 15 秒和 60 秒时各查一次；5 分钟 Cron 查创建 10 分钟到 24 小时之间的 pending 订单，指数退避（约 10、20、40……分钟，每轮最多 10 单）；后台订单详情有“查单”按钮，补单前先用。查到的付款和 webhook 走同一套核对与幂等键，迟到的 webhook 不会重复入账。浏览器只能传订单号，不能传付款状态。已有 `mismatch` 事件的订单留给人工核对。
+  - webhook 丢失或迟到时主动向支付商查单（`src/server/reconcile.ts`；Dodo 查 checkout session 再取 payment，Stripe 查 checkout session（带账单行和账单），Waffo 用 GraphQL `payments` 按商户订单号查）：成功页在约 15 秒和 60 秒时各查一次；5 分钟 Cron 查创建 10 分钟到 24 小时之间的 pending 订单，指数退避（约 10、20、40……分钟，每轮最多 10 单）；后台订单详情有“查单”按钮，补单前先用。查到的付款和 webhook 走同一套核对与幂等键，迟到的 webhook 不会重复入账。浏览器只能传订单号，不能传付款状态。已有 `mismatch` 事件的订单留给人工核对。
 - **生成**：先扣积分再入队，失败、超时或管理员判失败时自动退回。视频服务商的 webhook 和定时轮询可能同时处理同一个任务，只有一路能把任务置为成功，另一路不会删掉已落库的成片。
 - **成片分享**：用户在个人中心对自己的成片点“分享”，生成公开链接 `/v/<随机串>`（16 位，不可枚举，`/zh/v/…` 同样可用）。默认开启；`site.share.enabled` 设为 `false` 时按钮和页面都不出现，换脸、真人类站点建议关闭。
   - 分享页只有视频、AI 角标与声明、“我也做一条”按钮和举报入口，不显示作者信息，HTML 和接口里也没有视频 ID。响应头和 meta 都是 `noindex`，不进 sitemap。
@@ -366,12 +370,12 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 
 ```bash
 npm run typecheck
-npm test            # vitest：Waffo/Dodo 验签与事件映射、退款比例与退款单号规则、归因解析、生产环境禁用 mock、Turnstile 与图片审核的错误分支、邮件模板与发送重试判定、告警阈值与时间桶、GA4 同意前不加载与撤回删 Cookie、CSP 报告和前端错误上报的摘要与脱敏、登录跳转校验、Google 登录的 PKCE 与 nonce、账号按 sub 绑定与注销邮箱不再领注册赠送、成片下载大小上限、D1 备份的 SQL 转义、付款通知的消息格式与地址脱敏、归因 Cookie 等同意后才写入、5xx 详情不对非管理员返回、生产环境拒绝弱 SESSION_SECRET、上线配置检查与 doctor 的规则和 wrangler 输出解析、模板同步计划的分层、密钥同步计划的校验与脱敏、积分账务、兑换码、邀请奖励与订阅（日历月、年付补发、续费、乱序事件、周期校正时当期积分到期时间对齐、退款、Dodo/Waffo 事件映射，SQLite）、运营设置的校验缓存与每日上限、测试连接与脱敏、e2e 验收目录与用例一致
+npm test            # vitest：Waffo/Dodo/Stripe 验签与事件映射、退款比例与退款单号规则、归因解析、生产环境禁用 mock、Turnstile 与图片审核的错误分支、邮件模板与发送重试判定、告警阈值与时间桶、GA4 同意前不加载与撤回删 Cookie、CSP 报告和前端错误上报的摘要与脱敏、登录跳转校验、Google 登录的 PKCE 与 nonce、账号按 sub 绑定与注销邮箱不再领注册赠送、成片下载大小上限、D1 备份的 SQL 转义、付款通知的消息格式与地址脱敏、归因 Cookie 等同意后才写入、5xx 详情不对非管理员返回、生产环境拒绝弱 SESSION_SECRET、上线配置检查与 doctor 的规则和 wrangler 输出解析、模板同步计划的分层、密钥同步计划的校验与脱敏、积分账务、兑换码、邀请奖励与订阅（日历月、年付补发、续费、乱序事件、周期校正时当期积分到期时间对齐、退款、Dodo/Waffo 事件映射，SQLite）、运营设置的校验缓存与每日上限、测试连接与脱敏、e2e 验收目录与用例一致
 npm run test:e2e    # Playwright：需要先 npm run seed:local；会复用已运行在 127.0.0.1:3000 的 dev server
 E2E_PORT=3200 npm run test:e2e   # 3000 被其它程序占用时换端口
 npm run seo:check   # 需要 dev server 在跑；报告写到 .tmp/seo-check/
 SMOKE_BASE_URL=https://<domain> npm run test:smoke   # 线上只读巡检，见“部署到 Cloudflare”
-SANDBOX_PROVIDER=dodo E2E_PORT=3200 npm run test:sandbox   # 支付商 test 模式真实收银台（dodo 或 waffo），需要 .dev.vars 里的 test 凭据，不进 CI
+SANDBOX_PROVIDER=dodo E2E_PORT=3200 npm run test:sandbox   # 支付商 test 模式真实收银台（dodo、waffo 或 stripe），需要 .dev.vars 里的 test 凭据，不进 CI
 ```
 
 按风险分级的 e2e 验收目录和未覆盖项见 [tests/e2e/CATALOG.md](tests/e2e/CATALOG.md)。新增或改名用例时要同步更新，`npm test` 会核对两边是否一致。sandbox e2e 的前提、webhook 模式和测试卡见 [docs/payments.md](docs/payments.md) 的“sandbox e2e”。
@@ -412,7 +416,7 @@ migrations/             D1 迁移
 containers/postprocess/ 成片后处理容器：烧录水印、C2PA 签名、封面和预览（实验阶段，Worker 尚未接入，见 ROADMAP）
 seed/templates/         生成用的模板源视频
 .claude/skills/         Claude Code skill：new-hot-site（上新词）、sync-upstream（合并模板更新）、launch-audit（上线体检）
-scripts/                new-site（上新词）、doctor（部署前体检）、sync-plan（模板同步计划）、sync-secrets（密钥同步）、seo-check、indexnow、waffo-setup、dodo-setup、webhook-proxy、seed-local、占位素材生成
+scripts/                new-site（上新词）、doctor（部署前体检）、sync-plan（模板同步计划）、sync-secrets（密钥同步）、seo-check、indexnow、waffo-setup、dodo-setup、stripe-setup、webhook-proxy、seed-local、占位素材生成
 tests/                  unit（单元）、e2e（mock 服务商）、smoke（部署后巡检）、sandbox（支付商 test 模式）
 ```
 

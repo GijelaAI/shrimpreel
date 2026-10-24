@@ -92,6 +92,21 @@ describe('checkConfig', () => {
     expect(keys({ ...dodo, planIds: ['monthly', 'yearly'] })).toEqual([])
   })
 
+  it('Stripe：Key 的 test / live 模式要和 STRIPE_ENVIRONMENT 一致；doctor 只知道密钥名时不核对前缀', () => {
+    const stripe = (environment: string, key: string | true) =>
+      ready({
+        vars: { PAYMENT_PROVIDER: 'stripe', STRIPE_ENVIRONMENT: environment, STRIPE_PRODUCTS: '{"starter":"price_1","party":"price_2"}' },
+        secrets: { STRIPE_SECRET_KEY: key, STRIPE_WEBHOOK_SECRET: 'whsec_1' },
+      })
+    expect(keys(stripe('live', 'sk_live_1'))).toEqual([])
+    expect(keys(stripe('live', 'rk_live_1'))).toEqual([])
+    expect(keys(stripe('live', true))).toEqual([])
+    expect(keys(stripe('live', 'sk_test_1'))).toEqual(['error:STRIPE_SECRET_KEY'])
+    expect(keys(stripe('test', 'sk_test_1'))).toEqual(['warn:STRIPE_ENVIRONMENT'])
+    expect(keys(stripe('test', 'sk_live_1'))).toEqual(['error:STRIPE_SECRET_KEY', 'warn:STRIPE_ENVIRONMENT'])
+    expect(keys(stripe('live', 'pk_live_1'))).toEqual(['error:STRIPE_SECRET_KEY'])
+  })
+
   it('域名不一致、站点和邮箱仍是占位值、缺绑定', () => {
     expect(keys(ready({ vars: { SITE_URL: 'https://other.ai' } }))).toEqual(['error:SITE_URL'])
     expect(keys({ ...ready(), siteDomain: 'example.com', vars: { ...ready().vars, SITE_URL: 'https://moonhop.ai' } })).toEqual([

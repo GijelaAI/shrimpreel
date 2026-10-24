@@ -330,7 +330,7 @@ export function en(s: S) {
         paidAt: 'Paid on',
         refundedAt: 'Refunded on',
         provider: 'Payment processor',
-        providers: { waffo: 'Waffo', dodo: 'Dodo Payments', mock: 'Test checkout' } as Record<string, string>,
+        providers: { waffo: 'Waffo', dodo: 'Dodo Payments', stripe: 'Stripe', mock: 'Test checkout' } as Record<string, string>,
         print: 'Print',
         invoiceNote: 'Payments are handled by our payment processor as the merchant of record, and it emails your receipt or tax invoice. Can’t find it? Contact support with this order ID.',
         mockNote: 'This is a test order from the local mock checkout. No money was charged and no invoice is issued.',

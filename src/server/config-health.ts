@@ -41,6 +41,7 @@ export function isWeakSessionSecret(secret: string) {
 const PAYMENT_SECRETS: Record<string, string[]> = {
   waffo: ['WAFFO_MERCHANT_ID', 'WAFFO_PRIVATE_KEY'],
   dodo: ['DODO_API_KEY', 'DODO_WEBHOOK_SECRET'],
+  stripe: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'],
 }
 const VIDEO_SECRETS: Record<string, string[]> = { fal: ['FAL_KEY'], yir: ['YIR_API_KEY'] }
 const MODERATION_SECRETS: Record<string, string[]> = { openai: ['OPENAI_API_KEY'], none: [] }
@@ -107,7 +108,7 @@ export function checkConfig(input: ConfigInput): ConfigIssue[] {
 
   const payment = vars('PAYMENT_PROVIDER')
   if (payment === 'mock') error('PAYMENT_PROVIDER', 'PAYMENT_PROVIDER=mock：生产环境下单会返回 503')
-  else if (!PAYMENT_SECRETS[payment]) error('PAYMENT_PROVIDER', `未知的 PAYMENT_PROVIDER=${payment || '(空)'}，可选 waffo、dodo`)
+  else if (!PAYMENT_SECRETS[payment]) error('PAYMENT_PROVIDER', `未知的 PAYMENT_PROVIDER=${payment || '(空)'}，可选 waffo、dodo、stripe`)
   else {
     requireSecrets(PAYMENT_SECRETS[payment], `${payment} 支付`)
     const productsKey = `${payment.toUpperCase()}_PRODUCTS`
@@ -128,7 +129,14 @@ export function checkConfig(input: ConfigInput): ConfigIssue[] {
     if (payment === 'waffo' && planIds.length && !vars('WAFFO_STORE_ID')) {
       error('WAFFO_STORE_ID', 'WAFFO_STORE_ID 为空：开了订阅时，账单页的“管理付款”打不开，扣款失败的用户无法换卡')
     }
-    const live = payment === 'waffo' ? ['prod', 'production'].includes(vars('WAFFO_ENVIRONMENT')) : vars('DODO_ENVIRONMENT') === 'live'
+    const live = payment === 'waffo' ? ['prod', 'production'].includes(vars('WAFFO_ENVIRONMENT')) : vars(`${payment.toUpperCase()}_ENVIRONMENT`) === 'live'
+    // Stripe 的 test / live Key 前缀不同（sk_test_、rk_test_ / sk_live_、rk_live_），和 STRIPE_ENVIRONMENT 不符时 webhook 的 livemode 核对会拒收所有事件
+    const stripeKey = input.secrets.STRIPE_SECRET_KEY
+    if (payment === 'stripe' && typeof stripeKey === 'string' && text(stripeKey)) {
+      const keyMode = /^(sk|rk)_live_/.test(text(stripeKey)) ? 'live' : /^(sk|rk)_test_/.test(text(stripeKey)) ? 'test' : null
+      if (!keyMode) error('STRIPE_SECRET_KEY', 'STRIPE_SECRET_KEY 不是 sk_ 或 rk_ 开头的 Stripe 密钥')
+      else if (keyMode !== (live ? 'live' : 'test')) error('STRIPE_SECRET_KEY', `STRIPE_SECRET_KEY 是 ${keyMode} 模式的 Key，但 STRIPE_ENVIRONMENT=${vars('STRIPE_ENVIRONMENT') || '(空)'}`)
+    }
     const envKey = `${payment.toUpperCase()}_ENVIRONMENT`
     if (production && !live) warn(envKey, `${envKey}=${vars(envKey) || '(空)'}：仍是 test 模式，不会真实收款`)
     if (!production && live) warn(envKey, `${envKey} 是正式模式，但 APP_ENV 不是 production：预发应使用 test 店铺`)

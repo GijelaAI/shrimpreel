@@ -310,7 +310,7 @@ export function zh(s: S): Content {
         paidAt: '支付时间',
         refundedAt: '退款时间',
         provider: '支付服务商',
-        providers: { waffo: 'Waffo', dodo: 'Dodo Payments', mock: '测试收银台' } as Record<string, string>,
+        providers: { waffo: 'Waffo', dodo: 'Dodo Payments', stripe: 'Stripe', mock: '测试收银台' } as Record<string, string>,
         print: '打印',
         invoiceNote: '付款由支付服务商作为销售方（Merchant of Record）处理，收据或税务发票由它通过邮件发送。找不到的话，请带上订单号联系客服。',
         mockNote: '这是本地 mock 收银台产生的测试订单，没有实际扣款，也不会开具发票。',

@@ -1,6 +1,6 @@
 # 订阅使用手册
 
-模板默认开着月付和年付订阅，和积分包一起卖。这份手册讲怎么开关、怎么改套餐、在 Dodo 或 Waffo 上怎么配，以及用户和后台各能看到什么。入账规则和两家支付商的事件差异见 [payments.md](payments.md) 的“订阅”。
+模板默认开着月付和年付订阅，和积分包一起卖。这份手册讲怎么开关、怎么改套餐、在 Dodo、Waffo 或 Stripe 上怎么配，以及用户和后台各能看到什么。入账规则和各支付商的事件差异见 [payments.md](payments.md) 的“订阅”。
 
 ## 开关
 
@@ -39,11 +39,12 @@ plans: [
 
 ## 在支付商那边配置
 
-两家都用 setup 脚本建商品，脚本只建 `*_PRODUCTS` 里还没有的商品，重复运行不会重复建：
+三家都用 setup 脚本建商品，脚本只建 `*_PRODUCTS` 里还没有的商品，重复运行不会重复建：
 
 ```bash
 node scripts/dodo-setup.mjs --apply --write-dev-vars
 node scripts/waffo-setup.mjs --store STO_xxx --apply --write-dev-vars
+node scripts/stripe-setup.mjs --apply --write-dev-vars
 ```
 
 加 `--webhook https://<domain>/api/webhooks/<provider>` 会同时建 webhook 并订阅订阅事件；已有 webhook 时加 `--webhook-id <id>` 改地址和事件列表。
@@ -60,10 +61,16 @@ Waffo：
 - 商户 API 只能取消续费，撤销取消要买家在客户门户里操作，账单页会引导用户去门户。
 - 订阅首付的成功页文案是 “Subscription successful”，点 Done 跳回本站结果页。
 
+Stripe：
+
+- 套餐对应 recurring Price（`STRIPE_PRODUCTS` 填 `price_...`），首付和续费都按 `invoice.paid` 入账。
+- 取消和撤销都调 API（`cancel_at_period_end`），账单页有“继续订阅”按钮。
+- 客户门户要先在 Stripe 后台 Settings → Billing → Customer portal 保存一次配置，否则“管理付款”会报错。
+
 ## 用户和后台能看到什么
 
 - 定价页：订阅区显示月付、年付和年付折扣；已有有效订阅的用户再下单会被拒（409 `subscription_exists`）。
-- 账单页的订阅卡片：状态、每月积分、下次续费日和金额，年付还显示下次发放积分的日期；“取消续费”后显示当期结束日，Dodo 有“继续订阅”按钮，Waffo 提示去“管理付款”恢复；扣款失败时提示更新付款方式；“管理付款”打开支付商的客户门户。
+- 账单页的订阅卡片：状态、每月积分、下次续费日和金额，年付还显示下次发放积分的日期；“取消续费”后显示当期结束日，Dodo、Stripe 有“继续订阅”按钮，Waffo 提示去“管理付款”恢复；扣款失败时提示更新付款方式；“管理付款”打开支付商的客户门户。
 - 积分：订阅积分是当期结束作废的批次，生成视频时先扣快到期的。
 - 注销账号：订阅还会续费时不能注销（409 `subscription_active`），要先取消续费。
 - 后台：用户详情里有订阅表；每次扣款都是一张订单，可以像积分包订单一样查看事件、退款和补单。
@@ -77,7 +84,7 @@ Waffo：
 ## 测试
 
 - 本地（mock 支付）：`npm run test:e2e` 的 `subscriptions.spec.ts` 覆盖月付全流程和年付补发、退款。手动试时从定价页订阅，用 `/api/mock-payments/subscription` 模拟续费、扣款失败、取消等事件，用 `/api/dev/subscription-grants` 把时间往后拨看年付补发（两者只在本机 dev server 可用）。
-- 真实支付商：`SANDBOX_WEBHOOK=1` 的 sandbox e2e 有订阅用例，走真实收银台付月付、等 webhook 激活订阅、打开客户门户、取消续费（Dodo 还会撤销再取消）。准备步骤见 [payments.md](payments.md) 的“sandbox e2e”。用例最后会取消续费；中途失败时 test 订阅会一直续费，要到支付商后台或账单页手动取消。
+- 真实支付商：`SANDBOX_WEBHOOK=1` 的 sandbox e2e 有订阅用例，走真实收银台付月付、等 webhook 激活订阅、打开客户门户、取消续费（Dodo、Stripe 还会撤销再取消）。准备步骤见 [payments.md](payments.md) 的“sandbox e2e”。用例最后会取消续费；中途失败时 test 订阅会一直续费，要到支付商后台或账单页手动取消。
 - test 模式触发不了续费和扣款失败，这两条只由单元测试和 mock e2e 覆盖。
 
 ## 常见问题

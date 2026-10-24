@@ -26,6 +26,7 @@ import { seoRoutes } from './seo'
 import { assertShareable, findSharedGeneration, loadShare, readSharePoster, startShare, stopShare } from './shares'
 import { notifyContactMessage, runTakedownReminders } from './notifications'
 import { normalizeDodoEvent, verifyDodoWebhook } from './payments/dodo'
+import { expandStripeEvent, normalizeStripeEvent, verifyStripeWebhook } from './payments/stripe'
 import { getOrderProvider, getPaymentProvider, mockPaidKey } from './payments'
 import type { PaymentEvent } from './payments/types'
 import { WebhookVerificationError } from './payments/types'
@@ -779,6 +780,14 @@ app.post('/api/webhooks/dodo', async (c) => {
   const raw = await c.req.text()
   const payload = await verifyDodoWebhook(raw, c.req.raw.headers, c.env.DODO_WEBHOOK_SECRET)
   const result = await processPaymentEvent(c.env, 'dodo', normalizeDodoEvent(payload), raw)
+  return c.json({ received: true, ...result })
+})
+
+// 付款类事件验签后用固定 API 版本重新取对象（取不到 Stripe 时返回 502，Stripe 会重试），不受 webhook 端点 API 版本影响
+app.post('/api/webhooks/stripe', async (c) => {
+  const raw = await c.req.text()
+  const payload = await verifyStripeWebhook(raw, c.req.header('stripe-signature'), c.env.STRIPE_WEBHOOK_SECRET, c.env.STRIPE_ENVIRONMENT)
+  const result = await processPaymentEvent(c.env, 'stripe', normalizeStripeEvent(await expandStripeEvent(c.env, payload)), raw)
   return c.json({ received: true, ...result })
 })
 

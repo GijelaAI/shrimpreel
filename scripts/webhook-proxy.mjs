@@ -1,4 +1,4 @@
-// 本地联调支付 webhook 用的白名单反向代理：只转发 POST /api/webhooks/{waffo,dodo}，其余一律 404。
+// 本地联调支付 webhook 用的白名单反向代理：只转发 POST /api/webhooks/{waffo,dodo,stripe}，其余一律 404。
 // 把隧道（cloudflared / ssh -R）指向这个端口，而不是直接暴露 dev server（dev 登录、mock 支付、后台都不会被公网访问到）。
 //   node scripts/webhook-proxy.mjs [--port 3100] [--target http://127.0.0.1:3000]
 import { createServer, request } from 'node:http'
@@ -10,10 +10,10 @@ const arg = (name, fallback) => {
 }
 const port = Number(arg('port', '3100'))
 const target = new URL(arg('target', 'http://127.0.0.1:3000'))
-const ALLOWED = /^\/api\/webhooks\/(waffo|dodo)$/
+const ALLOWED = /^\/api\/webhooks\/(waffo|dodo|stripe)$/
 const MAX_BODY = 1024 * 1024
 // 只透传签名校验需要的头，避免把隧道侧的 X-Forwarded-* / Host 带进来
-const PASS_HEADERS = ['content-type', 'user-agent', 'x-waffo-signature', 'webhook-id', 'webhook-timestamp', 'webhook-signature']
+const PASS_HEADERS = ['content-type', 'user-agent', 'x-waffo-signature', 'webhook-id', 'webhook-timestamp', 'webhook-signature', 'stripe-signature']
 
 const log = (...parts) => console.log(new Date().toISOString(), ...parts)
 
@@ -49,7 +49,7 @@ createServer((req, res) => {
     } catch {
       event = 'non-json'
     }
-    const signed = Boolean(headers['x-waffo-signature'] || headers['webhook-signature'])
+    const signed = Boolean(headers['x-waffo-signature'] || headers['webhook-signature'] || headers['stripe-signature'])
     log('recv', path, event, `signed=${signed}`, `ua=${String(req.headers['user-agent'] ?? '-').slice(0, 60)}`)
     const upstream = request(
       { hostname: target.hostname, port: target.port, path, method: 'POST', headers },
@@ -69,4 +69,4 @@ createServer((req, res) => {
     })
     upstream.end(body)
   })
-}).listen(port, '127.0.0.1', () => log(`webhook proxy :${port} → ${target.origin} (only POST /api/webhooks/waffo|dodo)`))
+}).listen(port, '127.0.0.1', () => log(`webhook proxy :${port} → ${target.origin} (only POST /api/webhooks/waffo|dodo|stripe)`))

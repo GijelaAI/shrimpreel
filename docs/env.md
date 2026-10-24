@@ -18,12 +18,14 @@
 | --- | --- | --- | --- |
 | `APP_ENV` | `development`、`staging`、`production` | 是 | production 和 staging 下禁用 mock 服务商、开发登录和 `/api/dev/*`，Cookie 加 `Secure`。只有 production 允许搜索引擎抓取 |
 | `SITE_URL` | `https://<domain>` | 是 | 用于 canonical、sitemap、邮件链接、视频服务商回调地址和 CSRF 同源校验。production 下要和 `site.domain` 是同一个站点 |
-| `PAYMENT_PROVIDER` | `waffo`、`dodo`、`mock` | 是 | 新订单用哪个支付商。旧订单的退款和查单仍找原来的支付商。`mock` 只能在本地使用 |
+| `PAYMENT_PROVIDER` | `waffo`、`dodo`、`stripe`、`mock` | 是 | 新订单用哪个支付商。旧订单的退款和查单仍找原来的支付商。`mock` 只能在本地使用 |
 | `WAFFO_ENVIRONMENT` | `test`、`prod` | 用 Waffo 时 | 决定 API 地址和验签公钥；webhook 里的 `mode` 和它不一致时拒收 |
 | `WAFFO_PRODUCTS` | JSON，如 `{"starter":"PROD_xxx"}` | 用 Waffo 时 | 每个积分包和订阅套餐（`site.packages[].id`、`site.plans[].id`）对应的商品 ID，缺任何一个都报错（关掉订阅开关时不检查套餐，但已有订阅续费还要用，别删）。`scripts/waffo-setup.mjs` 可以生成 |
 | `WAFFO_STORE_ID` | Waffo 的店铺 ID，如 `STO_xxx` | 用 Waffo 且开了订阅时 | 账单页“管理付款”的客户门户要用，空着时扣款失败的用户没法换卡。`waffo-setup.mjs --write-dev-vars` 会一起写入 |
 | `DODO_ENVIRONMENT` | `test`、`live` | 用 Dodo 时 | 决定 API 地址 |
 | `DODO_PRODUCTS` | 同上 | 用 Dodo 时 | `scripts/dodo-setup.mjs` 可以生成 |
+| `STRIPE_ENVIRONMENT` | `test`、`live` | 用 Stripe 时 | webhook 里的 `livemode` 和它不一致时拒收；上线检查核对 `STRIPE_SECRET_KEY` 的前缀（`sk_test_` / `sk_live_`） |
+| `STRIPE_PRODUCTS` | JSON，值是 Price ID，如 `{"starter":"price_xxx"}` | 用 Stripe 时 | 积分包用一次性价格，订阅套餐用 recurring 价格。`scripts/stripe-setup.mjs` 可以生成 |
 | `VIDEO_PROVIDER` | `fal`、`yir`、`mock` | 是 | 模型和单价在 `site.video` 里配置，yir 的配置在 `site.video.yir` |
 | `MODERATION_PROVIDER` | `openai`、`none`、`mock` | 是 | 上传图片的审核方式。`none` 不审核，检查时给出警告 |
 | `GOOGLE_CLIENT_ID` | OAuth Client ID | 是 | 站点只有 Google 登录，留空就没人能登录 |
@@ -39,6 +41,7 @@
 | `GOOGLE_CLIENT_SECRET` | 配了 `GOOGLE_CLIENT_ID` | |
 | `WAFFO_MERCHANT_ID`、`WAFFO_PRIVATE_KEY` | `PAYMENT_PROVIDER=waffo` | 私钥支持 PKCS1 和 PKCS8，可以写成一行，换行用 `\n`。验签公钥已内置在代码里 |
 | `DODO_API_KEY`、`DODO_WEBHOOK_SECRET` | `PAYMENT_PROVIDER=dodo` | API 密钥需要的权限见 README 的“第三方回调地址”；卖订阅还要 Subscriptions 读写和 Customers 写入，见 [subscriptions.md](subscriptions.md) |
+| `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET` | `PAYMENT_PROVIDER=stripe` | secret key（`sk_`）或受限 Key（`rk_`，权限见 [payments.md](payments.md) 的“Stripe”）；webhook 密钥是端点的 `whsec_...`。可选 secret，类型声明在 `src/env.d.ts` |
 | `FAL_KEY` | `VIDEO_PROVIDER=fal` | |
 | `YIR_API_KEY` | `VIDEO_PROVIDER=yir` | 可选 secret，类型声明在 `src/env.d.ts`。建议在 yir Console 给这个 Key 设月度额度，见 README 的“视频服务商” |
 | `OPENAI_API_KEY` | `MODERATION_PROVIDER=openai` | 可选 secret，类型声明在 `src/env.d.ts` |
@@ -65,7 +68,7 @@
 | `SMOKE_BASE_URL`、`SMOKE_EXPECT`、`SMOKE_ALLOW_MOCK` | `npm run test:smoke`，见 README 的“部署后巡检” |
 | `BRAND_NAME` | `scripts/generate-placeholder-media.mjs`，占位素材上的品牌名 |
 
-`waffo-setup.mjs` 和 `dodo-setup.mjs` 从 `.dev.vars` 或同名环境变量读取凭据，不会打印密钥。
+`waffo-setup.mjs`、`dodo-setup.mjs` 和 `stripe-setup.mjs` 从 `.dev.vars` 或同名环境变量读取凭据，不会打印密钥。
 
 ## 新增变量
 

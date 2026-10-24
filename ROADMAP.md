@@ -1,12 +1,12 @@
 # ROADMAP
 
-## 当前状态（2026-10-22）
+## 当前状态（2026-10-24）
 
 本地全部可用。模板本身不部署上线（2026-10-20 决定），线上验证随第一个热词站进行。下文提到的 `.tmp/` 工件不入库，只在作者本机。
 
 - 已验证：
-  - 检查与构建：`npm run typecheck`；`npm test`（214 个单元测试）；`npm run build`。
-  - e2e：`npm run test:e2e`（64 个用例全部通过，2026-10-22）。
+  - 检查与构建：`npm run typecheck`；`npm test`（239 个单元测试）；`npm run build`。
+  - e2e：`npm run test:e2e`（64 个用例全部通过，2026-10-24）。
   - SEO：`npm run seo:check`（20 个页面 0 error）。
   - 支付商 sandbox（2026-10-21，`SANDBOX_WEBHOOK=1`，经隧道收真实 webhook）：Dodo 付款、拒付、部分退款 3 个用例通过，订阅用例的首付、激活、积分和门户通过，取消续费因 test 密钥缺 Subscriptions 写入返回 403；Waffo 付款、拒付和订阅 3 个用例全部通过。
 - 模板全面评审（2026-10-20）中不需要产品决策的 P0/P1 已在本地完成：
@@ -87,6 +87,9 @@
   - 密钥同步：`scripts/sync-secrets.mjs` 读 `.dev.vars.production`，对比 `wrangler secret list` 出计划（新增、已存在、只在远端、按所选服务商算出的同步后仍缺），只列名字。`--apply` 经 stdin 交给 `wrangler secret bulk`，输出脱敏；已存在的默认不覆盖，远端多出的不删除。文件没被 `.gitignore` 忽略、键名未登记或是 var、空值、占位值、弱 `SESSION_SECRET` 时拒绝写入；读不到远端列表时要加 `--overwrite`。单元测试用 fake wrangler 覆盖这些分支和脱敏；真实 wrangler 跑了 dry-run 和三种拒绝路径，日志里没有出现值。
   - 部署 workflow：`.github/workflows/deploy.yml.example`，站点复制为 `deploy.yml` 后手动触发：typecheck、单元测试、离线 doctor、`db:migrate:remote`、`npm run deploy`、线上巡检并上传报告。Cloudflare 的“Edit Cloudflare Workers” token 模板不含 D1 和 Queues，README 写明要加 D1 Edit 和 Queues Edit。核对了 wrangler 4.151 源码：CI 里 `d1 migrations apply` 的确认按 yes 继续；`secret bulk` 是 merge-patch，只改列出的键，Worker 不存在时会创建。
   - 未验证：真实 GitHub Actions 运行、真实 `secret bulk` 写入（都要真实站点，随第一个热词站进行）；actionlint（本机 Docker 未运行，只用 YAML 解析检查过）。
+- Stripe 支付（2026-10-24，开源用户要求）：`src/server/payments/stripe.ts` 接入积分包、订阅、退款、查单、取消/撤销续费和客户门户，webhook 路由 `/api/webhooks/stripe`；`STRIPE_PRODUCTS` 存 Price ID，`scripts/stripe-setup.mjs` 建 Product/Price 和 webhook；上线检查核对 Key 前缀与 `STRIPE_ENVIRONMENT`，测试连接逐个核对 Price 的金额、币种、类型和周期。单元测试 `stripe.test.ts`，sandbox 用例 `tests/sandbox/stripe.spec.ts` 4 个。说明见 `docs/payments.md` 的“Stripe”。
+  - 沙盒实测（2026-10-24，工件在 `.tmp/stripe-payments/`）：`stripe-setup.mjs` 建了 5 个 Price，重跑时按 lookup_key 复用；没有 webhook 时，付款、拒付 2 个用例通过；`SANDBOX_WEBHOOK=1` 经 Pinggy 隧道时 4 个用例全部通过（付款、拒付、部分退款、月付订阅的取消续费、撤销和门户），webhook 全部返回 200，没有 failed 或 mismatch；后台“测试连接”用真实 Price 返回 ok。临时 webhook 端点已删除。
+  - 未验证：真实续费和扣款失败（要等一个计费周期）；live 模式；异步付款方式（银行转账等）；退款成功后又失败时积分不会自动恢复。
 - 依赖：TanStack Start 1.169、`@cloudflare/vite-plugin` 1.64（miniflare 5 beta）、wrangler 4.151、Vite 8。
 
 ## 未验证
@@ -110,7 +113,7 @@
 
 - 本地 dev 下，miniflare 5 beta 在 Worker 不读完请求体就返回时，会让同一连接上的下一个请求出错。`src/server.ts` 里的 `drainUnreadBody` 是仅 dev 生效的规避代码。2026-10-21 在 `@cloudflare/vite-plugin` 1.64.0（miniflare 5.20261019.0-beta）上复测仍需要：去掉后同一连接连发跨域 JSON POST，结果是 403、500 交替，恢复后全是 403。下次升级用同样的办法复测（keep-alive 连接上连发 6 个带 JSON body、`Origin` 为外站的 POST）。
 - e2e 偶发 `page.goto: net::ERR_ABORTED`：2026-10-20 全量跑出现过 1 次（25/27），之后没有复现。可能的原因已在 2026-10-21 找到并修复：Tailwind v4 默认扫描整个仓库，样式经 `?url` 引入、不能热替换，所以 e2e 运行期间改 README 或 docs 会让 dev 页面整页刷新（同一天的举报用例偶发失败就是这样复现的）。`src/styles.css` 改为 `source('.')` 只扫描 `src/`。CI 里 Playwright 仍重试 1 次并保留 trace。
-- 用隧道联调时，支付商后台的 test webhook 指向临时地址，隧道失效后要更新 URL（Dodo 用 `dodo-setup.mjs --webhook-id`）。
+- 用隧道联调时，支付商后台的 test webhook 指向临时地址，隧道失效后要更新 URL（Dodo 用 `dodo-setup.mjs --webhook-id`，Stripe 用 `stripe-setup.mjs --webhook-id`）。
 - Dodo 收银台显示的商户名取自注册信息，上 live 前在 Dodo 后台改成品牌名。
 - Dodo 回跳 URL 带买家邮箱（`?email=`）。Worker 在渲染前 302 去掉，页面、GA4 和浏览器历史里都没有；但 Workers 日志里第一次请求的 URL 仍带邮箱。
 - 安全排查中暂未改动的项：

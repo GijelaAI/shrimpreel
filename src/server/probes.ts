@@ -5,6 +5,7 @@ import { audit, requireAdmin } from './http'
 import { getModerationProvider } from './moderation'
 import { activePaymentProviderId, getPaymentProvider } from './payments'
 import { dodoBaseUrl } from './payments/dodo'
+import { STRIPE_API_VERSION } from './payments/stripe'
 import { waffoEnvironment } from './payments/waffo'
 import type { AppContext, UserRow } from './types'
 import { ApiError, cleanSecret, createId, parseJsonRecord } from './util'
@@ -70,7 +71,7 @@ async function probeEmail(env: Env, admin: UserRow): Promise<Outcome> {
 async function probePayment(env: Env): Promise<Outcome> {
   const id = activePaymentProviderId(env)
   if (id === 'mock') return ok('mock 支付，不调用外部接口')
-  const products = parseJsonRecord(id === 'dodo' ? env.DODO_PRODUCTS : env.WAFFO_PRODUCTS)
+  const products = parseJsonRecord(id === 'dodo' ? env.DODO_PRODUCTS : id === 'stripe' ? env.STRIPE_PRODUCTS : env.WAFFO_PRODUCTS)
   // 积分包和订阅套餐都要有商品
   const items = [...site.packages, ...sellingPlans]
   const missing = items.filter((pack) => !products[pack.id]).map((pack) => pack.id)
@@ -80,6 +81,7 @@ async function probePayment(env: Env): Promise<Outcome> {
     const base = `签名和鉴权正常（${waffoEnvironment(env)} 环境）；Waffo 没有按商品查价格的接口，价格请在 Waffo 后台核对`
     return missing.length ? fail(`WAFFO_PRODUCTS 缺少套餐：${missing.join('、')}。${base}`) : ok(base)
   }
+  if (id === 'stripe') return probeStripePrices(env, items, products, missing)
   const apiKey = cleanSecret(env.DODO_API_KEY)
   if (!apiKey) return fail('DODO_API_KEY 未配置')
   const problems = missing.map((packId) => `${packId}：DODO_PRODUCTS 里没有商品 ID`)
@@ -111,6 +113,60 @@ async function probePayment(env: Env): Promise<Outcome> {
   if (problems.length) return fail([...problems, ...warnings].join('；'))
   if (warnings.length) return warn(warnings.join('；'))
   return ok(`鉴权正常，${items.length} 个套餐的商品和价格与 site.ts 一致`)
+}
+
+// 逐个查 STRIPE_PRODUCTS 里的 Price：金额、币种和 site.ts 一致，积分包是一次性价格、订阅套餐是周期价格
+async function probeStripePrices(
+  env: Env,
+  items: { id: string; priceCents: number; currency: string }[],
+  products: Record<string, string>,
+  missing: string[],
+): Promise<Outcome> {
+  const apiKey = cleanSecret(env.STRIPE_SECRET_KEY)
+  if (!apiKey) return fail('STRIPE_SECRET_KEY 未配置')
+  const planIntervals = new Map(sellingPlans.map((plan) => [plan.id, plan.interval]))
+  const problems = missing.map((packId) => `${packId}：STRIPE_PRODUCTS 里没有 Price ID`)
+  const warnings: string[] = []
+  for (const pack of items) {
+    const priceId = products[pack.id]
+    if (!priceId) continue
+    const response = await fetch(`https://api.stripe.com/v1/prices/${encodeURIComponent(priceId)}`, {
+      headers: { Authorization: `Bearer ${apiKey}`, 'Stripe-Version': STRIPE_API_VERSION },
+    })
+    if (response.status === 401) return fail('STRIPE_SECRET_KEY 无效')
+    if (response.status === 403) return fail('STRIPE_SECRET_KEY 没有读取 Prices 的权限（受限 Key 需要的权限见 docs/payments.md）')
+    if (response.status === 404) {
+      problems.push(`${pack.id}：Price ${priceId} 不存在（检查 Key 和 STRIPE_ENVIRONMENT 是否同一模式）`)
+      continue
+    }
+    if (!response.ok) {
+      problems.push(`${pack.id}：查询 Price 返回 HTTP ${response.status}`)
+      continue
+    }
+    const body = (await response.json().catch(() => null)) as {
+      unit_amount?: unknown
+      currency?: unknown
+      type?: unknown
+      active?: unknown
+      recurring?: { interval?: unknown; interval_count?: unknown } | null
+    } | null
+    const price = body?.unit_amount
+    const currency = body?.currency
+    const interval = planIntervals.get(pack.id)
+    const recurring = Boolean(interval)
+    if (body?.active === false) problems.push(`${pack.id}：Price ${priceId} 已停用，下单会失败`)
+    else if (body?.type !== (recurring ? 'recurring' : 'one_time')) {
+      problems.push(`${pack.id}：${recurring ? '订阅套餐要用周期价格（recurring）' : '积分包要用一次性价格（one_time）'}`)
+    } else if (recurring && (body?.recurring?.interval !== interval || (body?.recurring?.interval_count ?? 1) !== 1)) {
+      problems.push(`${pack.id}：Price 的扣款周期不是${interval === 'year' ? '每年' : '每月'}一次`)
+    } else if (typeof price !== 'number' || typeof currency !== 'string') warnings.push(`${pack.id}：读不到价格`)
+    else if (currency.toUpperCase() !== pack.currency) warnings.push(`${pack.id}：Stripe 币种是 ${currency}，site.ts 是 ${pack.currency}`)
+    else if (price < pack.priceCents) problems.push(`${pack.id}：Stripe 售价 ${price} 低于 site.ts 的 ${pack.priceCents}，付款会因金额不符不入账`)
+    else if (price > pack.priceCents) warnings.push(`${pack.id}：Stripe 售价 ${price} 高于页面展示的 ${pack.priceCents}`)
+  }
+  if (problems.length) return fail([...problems, ...warnings].join('；'))
+  if (warnings.length) return warn(warnings.join('；'))
+  return ok(`鉴权正常，${items.length} 个套餐的 Price 和价格与 site.ts 一致`)
 }
 
 function balanceOutcome(amount: number, currency: string, provider: string) {
