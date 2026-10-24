@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { site } from '#/config/site'
 import { signedUploadUrl } from '#/server/media'
 import { createYirProvider } from '#/server/video/yir'
@@ -33,9 +33,19 @@ function stubFetch(routes: Record<string, () => Response>) {
   return calls
 }
 
+// 站点会配置自己的 scene、routingOnly：用例默认按单步、不限定渠道跑，结束后还原站点配置
+const yirConfig = site.video.yir as { scene: unknown; routingOnly: readonly string[] | null }
+const siteYir = { scene: yirConfig.scene, routingOnly: yirConfig.routingOnly }
+
+beforeEach(() => {
+  yirConfig.scene = null
+  yirConfig.routingOnly = null
+})
+
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
+  Object.assign(yirConfig, siteYir)
 })
 
 describe('yir provider：提交', () => {
