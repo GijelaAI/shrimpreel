@@ -7,6 +7,7 @@
 //   node scripts/dodo-setup.mjs --apply                                 # 建商品，打印 DODO_PRODUCTS
 //   node scripts/dodo-setup.mjs --apply --write-dev-vars --webhook https://<host>/api/webhooks/dodo
 //   node scripts/dodo-setup.mjs --apply --write-dev-vars --webhook https://<new-host>/api/webhooks/dodo --webhook-id whk_xxx  # 隧道换域名后改 URL
+//   node scripts/dodo-setup.mjs --apply --brand <brand_id>              # 多个站共用一个 Dodo business 时，商品建在这个站的品牌下（Settings → Business 的 Brands）
 //
 // 已在 DODO_PRODUCTS 里有 id 的积分包和订阅套餐会跳过，重复运行不会重复建商品。
 // webhook 签名密钥只写进 .dev.vars 的 DODO_WEBHOOK_SECRET（需 --write-dev-vars），不打印；生产用 `wrangler secret put DODO_WEBHOOK_SECRET`。
@@ -41,6 +42,8 @@ const vars = { ...readDevVars(devVarsPath), ...pickEnv(['DODO_API_KEY', 'DODO_PR
 const environment = args.live ? 'live' : (vars.DODO_ENVIRONMENT ?? 'test')
 const baseUrl = environment === 'live' ? 'https://live.dodopayments.com' : 'https://test.dodopayments.com'
 const existing = safeJson(vars.DODO_PRODUCTS) ?? {}
+// 结账页、发票和账单描述按商品所属的品牌显示；不传就是 business 的主品牌
+const brand = args.brand ? { brand_id: String(args.brand) } : {}
 
 const plan = site.packages.map((pkg) => ({
   packageId: pkg.id,
@@ -49,6 +52,7 @@ const plan = site.packages.map((pkg) => ({
     name: `${site.brandName} · ${pkg.credits} credits`.slice(0, 64),
     description: `${pkg.credits} credits for ${site.brandName}. One-time purchase, credits never expire.`,
     tax_category: 'saas',
+    ...brand,
     price: { type: 'one_time_price', currency: pkg.currency, price: pkg.priceCents, discount: 0, purchasing_power_parity: false, tax_inclusive: false },
     metadata: { packageId: pkg.id, credits: String(pkg.credits), site: site.domain },
   },
@@ -64,6 +68,7 @@ for (const sub of sellingPlans) {
       name: `${site.brandName} · ${sub.interval === 'year' ? 'Yearly' : 'Monthly'} (${sub.credits} credits / month)`.slice(0, 64),
       description: `${sub.credits} credits every month for ${site.brandName}. Renews every ${sub.interval} until canceled; monthly credits expire at the end of each month.`,
       tax_category: 'saas',
+      ...brand,
       price: {
         type: 'recurring_price',
         currency: sub.currency,
@@ -82,7 +87,7 @@ for (const sub of sellingPlans) {
   })
 }
 
-console.log(`environment=${environment} apply=${Boolean(args.apply)}`)
+console.log(`environment=${environment} apply=${Boolean(args.apply)}${args.brand ? ` brand=${args.brand}` : ''}`)
 for (const item of plan) {
   const price = `${(item.body.price.price / 100).toFixed(2)} ${item.body.price.currency}${item.body.price.payment_frequency_interval ? ` / ${item.body.price.payment_frequency_interval}` : ''}`
   console.log(`  ${item.skip ? 'skip  ' : 'create'} ${item.packageId.padEnd(10)} ${item.body.name} (${price})${item.skip ? ` → ${existing[item.packageId]}` : ''}`)
