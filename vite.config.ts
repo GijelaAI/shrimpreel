@@ -8,6 +8,19 @@ import { defineConfig } from 'vite'
 const sandboxProvider = process.env.SANDBOX_PAYMENT_PROVIDER
 const sandboxSiteUrl = process.env.SANDBOX_SITE_URL
 
+// 站点上线后 wrangler.jsonc 的 vars 是生产值；dev server（本地开发、e2e、CI）一律换成这组开发值，
+// 否则会按 production 拦掉开发登录和 mock，e2e 的管理员也登不上。要在本地试真实服务商，写进 .dev.vars 覆盖。只影响 dev server，不进构建产物
+const LOCAL_DEV_VARS = {
+  APP_ENV: 'development',
+  SITE_URL: 'http://localhost:3000',
+  PAYMENT_PROVIDER: 'mock',
+  VIDEO_PROVIDER: 'mock',
+  MODERATION_PROVIDER: 'mock',
+  ADMIN_EMAILS: 'admin@example.com',
+  GOOGLE_CLIENT_ID: '',
+  TURNSTILE_SITE_KEY: '',
+}
+
 export default defineConfig(({ command, mode }) => ({
   resolve: { tsconfigPaths: true },
   // .tmp 下有 Playwright HTML report，不忽略的话写报告会触发页面整页刷新，干扰正在跑的 e2e
@@ -18,8 +31,14 @@ export default defineConfig(({ command, mode }) => ({
       viteEnvironment: { name: 'ssr' },
       configPath: mode === 'staging' ? 'wrangler.staging.jsonc' : undefined,
       config:
-        command === 'serve' && sandboxProvider && sandboxSiteUrl
-          ? (worker) => ({ vars: { ...worker.vars, PAYMENT_PROVIDER: sandboxProvider, SITE_URL: sandboxSiteUrl } })
+        command === 'serve'
+          ? (worker) => ({
+              vars: {
+                ...worker.vars,
+                ...LOCAL_DEV_VARS,
+                ...(sandboxProvider && sandboxSiteUrl ? { PAYMENT_PROVIDER: sandboxProvider, SITE_URL: sandboxSiteUrl } : {}),
+              },
+            })
           : undefined,
     }),
     tailwindcss(),

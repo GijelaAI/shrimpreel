@@ -147,6 +147,7 @@ npx wrangler r2 object put <name>-media/templates/<file>.mp4 --file seed/templat
   - 密钥只用 `wrangler secret list` 核对名字，不读取值。需要已登录 wrangler；首次部署时 Worker 还不存在，先写密钥（`wrangler secret put` 或 `sync-secrets --apply --overwrite`，都会创建 Worker）。`--offline` 跳过所有远端查询，`-c wrangler.staging.jsonc` 检查预发配置。
   - 后台概览的“上线配置检查”卡片按运行时 env 跑同一套规则（规则在 `src/server/config-health.ts`），还会检查 `SESSION_SECRET` 强度；只显示问题，不显示任何值。
 - 部署：`npm run deploy`。在 Cloudflare 控制台给 Worker 绑定自定义域名，`SITE_URL` 和 `site.domain` 要与之一致（canonical、sitemap 和 CSRF 同源校验都依赖它）。
+  - 上线时把 `wrangler.jsonc` 的 `vars` 改成生产值（`APP_ENV=production`、正式域名、真实服务商）。dev server（本地开发、e2e、CI）不读这些值：`vite.config.ts` 的 `LOCAL_DEV_VARS` 把环境、域名、服务商、管理员、Google 和 Turnstile 换成开发值，开发登录和 mock 照常可用。要在本地试真实服务商，写进 `.dev.vars` 覆盖。
 - `APP_ENV=production` 或 `staging` 时，若仍配置 `mock` 支付、`mock` 视频或 `mock` 审核，下单、生成和上传会返回 503；开发登录、mock 支付接口和 `/checkout/mock` 页面返回 404。`robots.txt` 只在 production 放开抓取。
 - 部署后巡检：`SMOKE_BASE_URL=https://<domain> npm run test:smoke`，预发加 `SMOKE_EXPECT=staging`。
 - 用 GitHub Actions 发布：站点仓库把 [.github/workflows/deploy.yml.example](.github/workflows/deploy.yml.example) 复制为 `deploy.yml`，手动触发后依次跑 typecheck、单元测试、离线体检、`db:migrate:remote`、`npm run deploy` 和部署后巡检（报告作为 artifact 上传）。

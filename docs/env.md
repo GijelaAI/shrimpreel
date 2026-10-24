@@ -4,7 +4,7 @@
 
 | 位置 | 内容 | 什么时候生效 |
 | --- | --- | --- |
-| `wrangler.jsonc` 的 `vars`（预发用 `wrangler.staging.jsonc`） | 非敏感的运行参数 | 构建时写进 `dist/server/wrangler.json`，`wrangler deploy` 读的是这份。改完要重新构建再部署（`npm run deploy` 会先构建）；只跑 `wrangler deploy` 会沿用上次构建的值 |
+| `wrangler.jsonc` 的 `vars`（预发用 `wrangler.staging.jsonc`） | 非敏感的运行参数 | 构建时写进 `dist/server/wrangler.json`，`wrangler deploy` 读的是这份。改完要重新构建再部署（`npm run deploy` 会先构建）；只跑 `wrangler deploy` 会沿用上次构建的值。dev server 不用这里的生产值，见 `vite.config.ts` 的 `LOCAL_DEV_VARS` |
 | Secret：本地写在 `.dev.vars`，线上用 `wrangler secret put <NAME>` 或 `node scripts/sync-secrets.mjs --apply`（读 `.dev.vars.production`）写入 | 密钥 | 运行时读取；写入会立即发布一个新版本 |
 | `src/config/site.ts` | 关键词、品牌、域名、价格、统计 ID、站长验证等 | 编译进代码，改完要重新部署 |
 

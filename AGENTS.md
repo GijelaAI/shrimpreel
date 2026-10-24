@@ -22,7 +22,7 @@
 
 ## 环境与开关
 
-- 新增环境变量时同时改：`wrangler.jsonc` 和 `wrangler.staging.jsonc` 的 `vars`（两边键要一致，`tests/unit/staging.test.ts` 会检查）、`.dev.vars.example`（密钥；`scripts/sync-secrets.mjs` 拒绝未登记的键，`scripts/sync-plan.mjs` 靠它发现模板新增的密钥）、`npm run cf:types` 重新生成 `worker-configuration.d.ts`（可选密钥写进 `src/env.d.ts`）、`src/server/config-health.ts` 的上线检查规则、[docs/env.md](docs/env.md)。
+- 新增环境变量时同时改：`wrangler.jsonc` 和 `wrangler.staging.jsonc` 的 `vars`（两边键要一致，`tests/unit/staging.test.ts` 会检查）、`.dev.vars.example`（密钥；`scripts/sync-secrets.mjs` 拒绝未登记的键，`scripts/sync-plan.mjs` 靠它发现模板新增的密钥）、`npm run cf:types` 重新生成 `worker-configuration.d.ts`（可选密钥写进 `src/env.d.ts`）、`src/server/config-health.ts` 的上线检查规则、[docs/env.md](docs/env.md)；本地开发要和生产取不同值的，加进 `vite.config.ts` 的 `LOCAL_DEV_VARS`。
 - `isProduction(env)`（`APP_ENV` 为 `production` 或 `staging`）下必须拒绝 `mock` 服务商、开发登录和 `/api/dev/*`。新增的开发或 mock 端点第一行调用 `isLocalDevRequest`，并在 `tests/smoke/production.spec.ts` 的 404 列表里登记。
 - `src/server/config-health.ts` 不能有 import：`scripts/doctor.mjs` 用 Node 直接加载它。
 - 密钥只能检查有没有、够不够强，不能出现在日志、接口响应或报错里。
