@@ -120,6 +120,33 @@ test('维护模式：新生成和下单返回 503，已建订单的支付回调�
   await expect(page.getByTestId('maintenance-notice')).toHaveCount(0)
 })
 
+test('暂停收款：价格页按钮变成“支付即将开放”，下单返回 503，生成和已建订单的回调照常，管理员不受限', async ({ page, request }) => {
+  await setSettings({ signupBonusCredits: 10 })
+  const { uploadId } = await userWithUpload(request)
+  const { orderId } = await json<{ orderId: string }>(post(request, '/api/checkout', { packageId: 'starter', locale: 'en' }))
+
+  await setSettings({ checkoutPaused: true })
+  expect(await json(post(request, '/api/checkout', { packageId: 'starter', locale: 'en' }), 503)).toEqual({ error: 'checkout_paused' })
+  await json(post(request, '/api/mock-payments/complete', { orderId, outcome: 'paid' }))
+  expect(await credits(request)).toBeGreaterThan(10)
+  await json(generate(request, uploadId), 201)
+  await json(post(admin, '/api/checkout', { packageId: 'starter', locale: 'en' }))
+
+  await page.goto('/pricing')
+  await expect(page.getByTestId('checkout-paused')).toHaveText(content.en.pricing.pausedNote)
+  await expect(page.getByTestId('buy-starter')).toBeDisabled()
+  await expect(page.getByTestId('buy-starter')).toHaveText(content.en.pricing.paused)
+  await page.goto('/zh/pricing')
+  await expect(page.getByTestId('buy-starter')).toHaveText(content.zh.pricing.paused)
+  await expect(page.getByTestId('maintenance-notice')).toHaveCount(0)
+
+  await setSettings({ checkoutPaused: false })
+  await page.goto('/pricing')
+  await expect(page.getByTestId('buy-starter')).toHaveText(content.en.pricing.buy)
+  await expect(page.getByTestId('buy-starter')).toBeEnabled()
+  await expect(page.getByTestId('checkout-paused')).toHaveCount(0)
+})
+
 test('全站公告按语言显示，提交时压成一行；清空后不显示', async ({ page }) => {
   const view = await setSettings({ 'announcement.en': 'Spring sale: 20% off', 'announcement.zh': '  春季\n特惠   八折 ' })
   expect(view.values['announcement.zh']).toBe('春季 特惠 八折')

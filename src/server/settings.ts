@@ -10,6 +10,7 @@ import { ApiError, nowIso } from './util'
 
 export type RuntimeSettings = {
   maintenance: boolean
+  checkoutPaused: boolean
   signupBonusCredits: number
   signupBonusValidDays: number
   referralRewardCredits: number
@@ -32,6 +33,12 @@ export const SETTING_FIELDS: readonly SettingField[] = [
     kind: 'bool',
     label: '维护模式',
     help: '暂停新的生成和下单（返回 503），前台每页顶部显示维护提示。登录、查看、下载和支付回调照常；管理员不受限制，便于验证',
+  },
+  {
+    key: 'checkoutPaused',
+    kind: 'bool',
+    label: '暂停收款',
+    help: '支付商还没开通或临时出问题时打开：价格页的购买按钮变成“支付即将开放”，新下单返回 503。生成、已建订单的支付回调照常；管理员不受限制，便于验证',
   },
   ...LOCALES.map(
     (locale): SettingField => ({
@@ -66,6 +73,7 @@ export const SETTING_FIELDS: readonly SettingField[] = [
 
 export const DEFAULT_SETTINGS: RuntimeSettings = {
   maintenance: false,
+  checkoutPaused: false,
   ...(Object.fromEntries(LOCALES.map((locale) => [`announcement.${locale}`, ''])) as Record<`announcement.${Locale}`, string>),
   signupBonusCredits: site.signupBonusCredits,
   signupBonusValidDays: site.signupBonusValidDays,
@@ -140,6 +148,12 @@ export function assertOpen(settings: RuntimeSettings, user: UserRow) {
   if (settings.maintenance && user.role !== 'admin') throw new ApiError(503, 'maintenance')
 }
 
+// 暂停收款时拒绝新的下单；管理员放行
+export function assertCheckoutOpen(settings: RuntimeSettings, user: UserRow) {
+  assertOpen(settings, user)
+  if (settings.checkoutPaused && user.role !== 'admin') throw new ApiError(503, 'checkout_paused')
+}
+
 export const referralActive = (settings: RuntimeSettings) => settings.referralRewardCredits > 0
 
 // 全站每日生成上限（UTC 自然日）。预检查只为尽早拒绝；并发提交由 batch 里的断言兜底，超出时整个 batch 回滚
@@ -161,6 +175,7 @@ export function dailyCapGuard(db: D1Database, cap: number, now: string) {
 export function publicNotice(settings: RuntimeSettings) {
   return {
     maintenance: settings.maintenance,
+    checkoutPaused: settings.checkoutPaused,
     announcement: Object.fromEntries(LOCALES.map((locale) => [locale, settings[`announcement.${locale}`]])) as Record<Locale, string>,
   }
 }

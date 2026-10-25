@@ -18,6 +18,8 @@ export function Pricing() {
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const shortest = site.durations[0]!
+  // 后台暂停收款时按钮不可点；管理员照常，便于验证
+  const paused = !!config?.notice.checkoutPaused && user?.role !== 'admin'
 
   async function buy(packageId: string) {
     if (!user) {
@@ -49,11 +51,13 @@ export function Pricing() {
         type="button"
         onClick={() => buy(id)}
         // 会话还在加载时 user 为空，此时点击会把已登录用户误送去登录页
-        disabled={pending !== null || loading}
+        disabled={pending !== null || loading || paused}
         className={`${primary ? 'btn-primary' : 'btn-ghost'} mt-auto w-full`}
         data-testid={`buy-${id}`}
       >
-        {pending === id ? (
+        {paused ? (
+          p.paused
+        ) : pending === id ? (
           <>
             <Spinner /> {p.buying}
           </>
@@ -66,6 +70,11 @@ export function Pricing() {
 
   return (
     <div className="space-y-6">
+      {paused ? (
+        <p role="status" className="mx-auto max-w-2xl rounded-xl bg-amber-100 px-4 py-3 text-center text-sm text-amber-900 dark:bg-amber-900/40 dark:text-amber-200" data-testid="checkout-paused">
+          {p.pausedNote}
+        </p>
+      ) : null}
       {sellingPlans.length ? (
         <>
           <div className="mx-auto max-w-2xl text-center">

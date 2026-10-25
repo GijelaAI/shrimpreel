@@ -196,6 +196,9 @@ export function en(s: S) {
       save: (percent: number) => `Save ${percent}%`,
       buy: 'Buy credits',
       buying: 'Opening checkout…',
+      // 后台“暂停收款”打开时代替购买按钮和价格说明
+      paused: 'Payments opening soon',
+      pausedNote: 'We’re finishing setup with our payment partner, so purchases aren’t open yet. Check back soon.',
       credits: (n: number) => `${n} credits`,
       approx: (videos: number, seconds: number) => `≈ ${videos} videos of ${seconds} s`,
       bullets: ['Credits never expire', 'All video lengths', 'HD MP4 download, no watermark', 'Automatic refund on failed renders'],
@@ -497,6 +500,7 @@ export function en(s: S) {
       already_redeemed: 'You have already redeemed this code.',
       too_many_active_jobs: 'You already have 3 videos rendering. Please wait for one to finish.',
       maintenance: 'We’re doing some maintenance. Please try again in a little while.',
+      checkout_paused: 'Payments aren’t open yet. Please check back soon.',
       daily_limit: 'We’ve hit today’s rendering capacity. Please try again tomorrow; your credits were not used.',
       rate_limited: 'Too many requests. Please wait a minute and try again.',
       file_too_large: 'That file is larger than 10 MB.',

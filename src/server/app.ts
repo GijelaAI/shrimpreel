@@ -21,7 +21,7 @@ import { processPaymentEvent } from './orders'
 import { reconcileOrder, reconcilePendingOrders } from './reconcile'
 import { normalizeCode, redeemCode } from './redeem'
 import { REFERRAL_COOKIE, ensureReferralCode, normalizeReferralCode, referralSummary, requestReferral } from './referrals'
-import { assertOpen, dailyCapGuard, generationsToday, getSettings, publicNotice, referralActive } from './settings'
+import { assertCheckoutOpen, assertOpen, dailyCapGuard, generationsToday, getSettings, publicNotice, referralActive } from './settings'
 import { seoRoutes } from './seo'
 import { assertShareable, findSharedGeneration, loadShare, readSharePoster, startShare, stopShare } from './shares'
 import { notifyContactMessage, runTakedownReminders } from './notifications'
@@ -481,7 +481,7 @@ app.post('/api/redeem', async (c) => {
 
 app.post('/api/checkout', async (c) => {
   const user = requireUser(c)
-  assertOpen(await getSettings(c.env), user)
+  assertCheckoutOpen(await getSettings(c.env), user)
   await rateLimit(c.env.AUTH_LIMITER, `checkout:${user.id}`)
   const body = await readJson<{ packageId: string; locale: string }>(c)
   // packageId 可以是积分包或在售的订阅套餐（订阅开关关掉时套餐不能再下单）
