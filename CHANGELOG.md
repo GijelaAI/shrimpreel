@@ -6,6 +6,15 @@ Notable changes to the template. Derived sites pick them up with `git merge` fro
 
 ## 2026-10-25
 
+### Added: optional Resend channel for transactional email
+
+- **`RESEND_API_KEY`** (optional secret): when it is set and `EMAIL_FROM` is non-empty, every email goes out through [Resend](https://resend.com/) (`src/server/resend.ts`, `POST https://api.resend.com/emails`) instead of the `send_email` binding. Workers Free only lets Email Service reach addresses verified in Cloudflare; Resend's free tier (3,000 a month, 100 a day) can email users. Daily or monthly quota (429) and rate limits are retried with the usual backoff, 5xx and network errors too; domain not verified, invalid key and other 4xx fail immediately. The key never appears in errors. Without the key nothing changes.
+- The admin connection test for email names the channel (Resend or Cloudflare Email Service). `npm run doctor` and the overview check warn in production when `EMAIL_FROM` is set but `RESEND_API_KEY` is not (Workers Free limitation), and warn when `EMAIL_FROM` is on another domain than the site, pointing at Resend verification when the key is set.
+
+Upgrading a site (only if you want Resend): sign up at Resend, add and verify the sending domain under Domains (SPF/DKIM), create an API key, add `RESEND_API_KEY` to `.dev.vars.production`, run `node scripts/sync-secrets.mjs --apply`, then run the email "Test connection" in the admin and check the inbox. No new vars or migrations.
+
+新增：交易邮件可选走 Resend。配置可选 secret `RESEND_API_KEY` 且 `EMAIL_FROM` 非空时，全部邮件经 Resend（`src/server/resend.ts`，`POST https://api.resend.com/emails`）发送，不再用 `send_email` binding。Workers Free 上 Email Service 只能发给 Cloudflare 里已验证的地址，Resend 免费档（每月 3000 封、每天 100 封）可以发给用户。429 的日 / 月额度和限流、5xx 和网络错误按原有退避重试；域名未验证、Key 无效等其它 4xx 直接失败；错误信息不含 Key。不配 Key 则行为完全不变。后台邮件“测试连接”会注明走的渠道；`npm run doctor` 和概览的配置检查在生产环境 `EMAIL_FROM` 非空但没配 `RESEND_API_KEY` 时警告（Workers Free 限制），`EMAIL_FROM` 域名与站点不同时警告，配了 Key 则提示去 Resend 验证。站点升级（想用 Resend 才需要）：注册 Resend，在 Domains 添加并验证发件域名（SPF/DKIM），创建 API Key 写进 `.dev.vars.production` 的 `RESEND_API_KEY`，运行 `node scripts/sync-secrets.mjs --apply`，再到后台对邮件点“测试连接”并查收。没有新增 vars 和迁移。
+
 ### Added: buy in the generator, "makes N videos" on packs, `/llms.txt`, alerts in chat and a low-balance alert
 
 - **Inline paywall**: when a signed-in user doesn't have enough credits for the chosen length, the generator's main button checks out the cheapest pack that covers the shortfall ("Get 18 credits · $9.90"), with a "See all packs" link below. With no such pack it still links to `/pricing`. Checkout logic moved to `useCheckout()` in `src/lib/checkout.ts`, shared with the pricing page; the checkout pause rules are unchanged.

@@ -356,6 +356,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
   1. Cloudflare 控制台 → Compute > Email Service → Onboard Domain，添加站点域名（DNS 必须托管在 Cloudflare），按提示添加 SPF/DKIM 记录。
   2. 账号需要 Workers Paid 才能发给任意收件人。每月含 3,000 封，超出部分每千封 $0.35（[价格](https://developers.cloudflare.com/email-service/platform/pricing/)）。
   3. `vars.EMAIL_FROM` 改成 `noreply@<domain>`（`new-site.mjs` 会自动改），然后运行 `npm run db:migrate:remote` 应用 0004。
+- **可选：改走 Resend**（例如 Workers Free 上，Email Service 只能发给 Cloudflare 里已验证的地址）：注册 [Resend](https://resend.com/)，在 Domains 验证发件域名，创建 API Key，写进 `.dev.vars.production` 的 `RESEND_API_KEY` 后运行 `node scripts/sync-secrets.mjs --apply`（或 `npx wrangler secret put RESEND_API_KEY`）。配了 Key 且 `EMAIL_FROM` 非空时，全部邮件走 Resend，不再用 `send_email` binding（免费档每月 3000 封、每天 100 封；额度用完按限流重试）。到后台对“邮件”点“测试连接”确认，结果会注明走的渠道。不配 Key 则行为不变。
 - `EMAIL_FROM` 留空或没有 binding 时不发信，邮件记为“未发送”；配好后可在后台重发。本地 `wrangler dev` 只模拟发送，不要给 binding 加 `"remote": true`。
 
 ## 监控告警

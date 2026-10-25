@@ -356,6 +356,7 @@ Sent directly from the Worker with [Cloudflare Email Service](https://developers
   1. Cloudflare dashboard → Compute > Email Service → Onboard Domain, add the site's domain (DNS must be on Cloudflare) and add the SPF/DKIM records it shows.
   2. Sending to arbitrary recipients requires Workers Paid. 3,000 emails a month are included, then $0.35 per thousand ([pricing](https://developers.cloudflare.com/email-service/platform/pricing/)).
   3. Set `vars.EMAIL_FROM` to `noreply@<domain>` (`new-site.mjs` does this), then run `npm run db:migrate:remote`.
+- **Optional: send through Resend** (e.g. on Workers Free, where Email Service only reaches addresses verified in Cloudflare): sign up at [Resend](https://resend.com/), verify the sending domain under Domains, create an API key, put it in `.dev.vars.production` as `RESEND_API_KEY` and run `node scripts/sync-secrets.mjs --apply` (or `npx wrangler secret put RESEND_API_KEY`). With the key set and `EMAIL_FROM` non-empty, all emails go through Resend instead of the `send_email` binding (free tier: 3,000 a month, 100 a day; hitting the quota is retried like any rate limit). Run "Test connection" for email in the admin to confirm; the result names the channel used. Without the key nothing changes.
 - With `EMAIL_FROM` empty or no binding, nothing is sent and emails are marked "not sent"; resend them from the admin once configured. Local `wrangler dev` only simulates sending; don't add `"remote": true` to the binding.
 
 ## Monitoring and alerts

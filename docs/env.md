@@ -31,7 +31,7 @@
 | `GOOGLE_CLIENT_ID` | OAuth Client ID | 是 | 站点只有 Google 登录，留空就没人能登录 |
 | `TURNSTILE_SITE_KEY` | 站点密钥 | 否 | 留空则留言和举报表单不做人机校验，检查时给出警告 |
 | `ADMIN_EMAILS` | 逗号分隔的邮箱 | 是 | 这些邮箱登录时自动成为管理员，同时接收举报、留言提醒和系统告警。从列表里删掉不会撤销管理员角色 |
-| `EMAIL_FROM` | 发件地址 | 否 | 域名要先在 Cloudflare Email Service 完成 Onboard。留空则不发信，后台“邮件”页记为 skipped |
+| `EMAIL_FROM` | 发件地址 | 否 | 域名要先在 Cloudflare Email Service 完成 Onboard（配了 `RESEND_API_KEY` 时改为在 Resend 验证）。留空则不发信，后台“邮件”页记为 skipped |
 
 ## Secret
 
@@ -48,6 +48,7 @@
 | `OPENAI_API_KEY` | `MODERATION_PROVIDER=openai` | 可选 secret，类型声明在 `src/env.d.ts` |
 | `TURNSTILE_SECRET_KEY` | 配了 `TURNSTILE_SITE_KEY` | 同上 |
 | `PAYMENT_NOTIFY_WEBHOOK_URL` | 可选 | 每笔订单首次入账（含后台补单）时往聊天群发一条付款消息：金额、套餐、积分、来源和订单号。按域名识别：Telegram 填 `https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>`；飞书 / Lark 填自定义机器人地址（不要开“签名校验”，可以用关键词“新付款”）；Discord 填频道 webhook；其他地址（如 Slack Incoming Webhook）发 `{"text": ...}`。发送失败只记日志，不影响入账。也会收到运维告警（健康检查、备份失败、视频服务商余额低于 10 美元；同一类告警每 6 小时最多一条），飞书关键词建议同时加“告警”。地址里带 token，所以放 secret。可选 secret，类型声明在 `src/env.d.ts` |
+| `RESEND_API_KEY` | 可选 | 配了且 `EMAIL_FROM` 非空时，全部交易邮件改走 [Resend](https://resend.com/)（`POST /emails`），不再用 `send_email` binding；不配则行为不变。Workers Free 上 Email Service 只能发给 Cloudflare 里已验证的地址，Resend 免费档（每月 3000 封、每天 100 封）可以发给用户。发件域名要先在 Resend 的 Domains 验证，后台“测试连接”会注明走的是哪个渠道。可选 secret，类型声明在 `src/env.d.ts` |
 
 切换支付商后，只要旧支付商还有订单可能退款或需要查单，就保留它的 secret。
 

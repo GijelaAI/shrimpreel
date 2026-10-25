@@ -33,6 +33,7 @@ function ready(overrides: { vars?: Record<string, string>; secrets?: ConfigInput
       FAL_KEY: 'f',
       OPENAI_API_KEY: 'o',
       TURNSTILE_SECRET_KEY: 't',
+      RESEND_API_KEY: 're_x',
       ...overrides.secrets,
     },
     bindings: REQUIRED_BINDINGS,
@@ -124,6 +125,21 @@ describe('checkConfig', () => {
     expect(checkConfig({ ...ready(), bindings: ['DB', 'MEDIA'] })).toEqual([
       expect.objectContaining({ key: 'bindings', message: expect.stringContaining('KV、VIDEO_QUEUE') }),
     ])
+  })
+
+  it('发信渠道：生产环境没配 RESEND_API_KEY 提示 Workers Free 限制；配了则只在发件域名与站点不同时提示去 Resend 验证', () => {
+    const noKey = { secrets: { RESEND_API_KEY: undefined } }
+    expect(keys(ready(noKey))).toEqual(['warn:RESEND_API_KEY'])
+    expect(keys(ready({ secrets: { RESEND_API_KEY: '  ' } }))).toEqual(['warn:RESEND_API_KEY'])
+    expect(keys(ready({ secrets: { RESEND_API_KEY: true } }))).toEqual([])
+    // 与 Email Service Onboard 提示各说各的，不重复
+    expect(keys(ready({ ...noKey, vars: { EMAIL_FROM: 'noreply@other.ai' } }))).toEqual(['warn:RESEND_API_KEY', 'warn:EMAIL_FROM'])
+    expect(checkConfig(ready({ vars: { EMAIL_FROM: 'noreply@other.ai' } }))).toEqual([
+      expect.objectContaining({ key: 'EMAIL_FROM', message: expect.stringContaining('Resend') }),
+    ])
+    // 预发环境、EMAIL_FROM 为空时不提示 Workers Free
+    expect(keys(ready({ ...noKey, vars: { APP_ENV: 'staging' } }))).not.toContain('warn:RESEND_API_KEY')
+    expect(keys(ready({ ...noKey, vars: { EMAIL_FROM: '' } }))).toEqual(['warn:EMAIL_FROM'])
   })
 })
 

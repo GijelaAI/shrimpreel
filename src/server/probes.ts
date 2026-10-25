@@ -54,7 +54,7 @@ async function probeKv(env: Env): Promise<Outcome> {
 
 async function probeEmail(env: Env, admin: UserRow): Promise<Outcome> {
   const config = emailConfig(env)
-  if (!config) return { status: 'skipped', message: '没有配置 EMAIL_FROM 或 send_email binding，站点不发邮件' }
+  if (!config) return { status: 'skipped', message: '没有配置 EMAIL_FROM，或既没有 RESEND_API_KEY 也没有 send_email binding，站点不发邮件' }
   const text = `这是 ${site.brandName} 后台“测试连接”发出的测试邮件，收到说明发信配置正常，无需回复。`
   const { messageId } = await config.mailer.send({
     from: config.from,
@@ -64,7 +64,8 @@ async function probeEmail(env: Env, admin: UserRow): Promise<Outcome> {
     html: `<p>${text}</p>`,
     replyTo: config.from.email,
   })
-  return ok(`已从 ${config.from.email} 发到 ${admin.email}（${messageId}），请到收件箱确认`)
+  const channel = config.provider === 'resend' ? 'Resend' : 'Cloudflare Email Service'
+  return ok(`已通过 ${channel} 从 ${config.from.email} 发到 ${admin.email}（${messageId}），请到收件箱确认`)
 }
 
 async function probePayment(env: Env, override: string): Promise<Outcome> {

@@ -180,8 +180,23 @@ export function checkConfig(input: ConfigInput): ConfigIssue[] {
   const fromDomain = from.split('@')[1]?.toLowerCase() ?? ''
   if (!from) warn('EMAIL_FROM', 'EMAIL_FROM 为空：不发交易邮件和管理员提醒')
   else if (!fromDomain || PLACEHOLDER_HOSTS.test(fromDomain)) error('EMAIL_FROM', `EMAIL_FROM=${from}：不是可发信的地址`)
-  else if (production && !PLACEHOLDER_HOSTS.test(input.siteDomain) && !sameSite(fromDomain, input.siteDomain.toLowerCase())) {
-    warn('EMAIL_FROM', `EMAIL_FROM 的域名 ${fromDomain} 与站点域名 ${input.siteDomain} 不同：确认该域名已在 Email Service 完成 Onboard`)
+  else {
+    // 可选的 Resend 渠道：配了 RESEND_API_KEY 就走 Resend，不再用 send_email binding
+    const resend = input.secrets.RESEND_API_KEY === true || Boolean(text(input.secrets.RESEND_API_KEY as string | undefined))
+    if (production && !resend) {
+      warn(
+        'RESEND_API_KEY',
+        '未配置 RESEND_API_KEY：Cloudflare Email Service 在 Workers Free 上只能发给 Cloudflare 里已验证的地址（管理员），发给用户需要 Workers Paid，或配置 RESEND_API_KEY 改走 Resend',
+      )
+    }
+    if (production && !PLACEHOLDER_HOSTS.test(input.siteDomain) && !sameSite(fromDomain, input.siteDomain.toLowerCase())) {
+      warn(
+        'EMAIL_FROM',
+        resend
+          ? `EMAIL_FROM 的域名 ${fromDomain} 与站点域名 ${input.siteDomain} 不同：确认该域名已在 Resend 完成验证（Domains）`
+          : `EMAIL_FROM 的域名 ${fromDomain} 与站点域名 ${input.siteDomain} 不同：确认该域名已在 Email Service 完成 Onboard`,
+      )
+    }
   }
 
   return issues
