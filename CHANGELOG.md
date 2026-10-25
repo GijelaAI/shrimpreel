@@ -6,6 +6,14 @@ Notable changes to the template. Derived sites pick them up with `git merge` fro
 
 ## 2026-10-25
 
+### Fixed: sign-in and checkout returns counted as traffic sources
+
+- Coming back from Google sign-in or a payment provider's checkout page left `accounts.google.com` (or the checkout domain) in `document.referrer`, so the visitor's last touch became `google / organic` (or a referral from the payment provider) and orders were attributed to it. These hosts (`accounts.google.*`, `*.dodopayments.com`, `*.waffo.ai`, `*.stripe.com`, `*.paypal.com`; list in `src/lib/referrer.ts`) no longer count as a referrer on the client, and the server classifies them as `direct`, so orders fall back to the first touch even for cookies written before the fix.
+
+Upgrading a site: nothing to do. Existing `orders.source` values are not rewritten; their raw touches are still in the `attribution` column.
+
+修复：Google 登录、支付商结账页回跳后，`document.referrer` 是 `accounts.google.com` 或结账域名，最近一次触达被记成 `google / organic`（或来自支付商的 referral），订单来源跟着错。现在这些域名（`accounts.google.*`、`*.dodopayments.com`、`*.waffo.ai`、`*.stripe.com`、`*.paypal.com`，表在 `src/lib/referrer.ts`）客户端不记为 referrer，服务端按 `direct` 归类，修复前写下的 Cookie 下单时也会回落到首次触达。站点升级：无需操作；已写入 `orders.source` 的旧记录不会改写，原始触达仍在 `attribution` 列里。
+
 ### Docs: showcase
 
 - Both READMEs get a "Built with ShrimpReel" section: a card image (`docs/media/showcase-christmas-dance-ai.jpg`) linking to Christmas Dance AI, the first live site built from the template. The status note now says a site runs in production.
