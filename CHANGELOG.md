@@ -8,11 +8,11 @@ Notable changes to the template. Derived sites pick them up with `git merge` fro
 
 ### Added: checkout pause
 
-- A new runtime setting `checkoutPaused` ("暂停收款" in `/admin/settings`) for a payment provider that isn't live yet or is temporarily broken. While it's on, the pricing page buttons show a disabled "Payments opening soon" with a note at the top, and `POST /api/checkout` returns 503 `checkout_paused` (admins exempt). Generation, sign-in and webhooks for existing orders keep working. `/api/me` exposes it as `config.notice.checkoutPaused`.
+- A new runtime setting `checkoutPaused` ("暂停收款" in `/admin/settings`) for a payment provider that isn't live yet or is temporarily broken. While it's on, the pricing page buttons show a disabled "Payments opening soon" with a note at the top, and `POST /api/checkout` returns 503 `checkout_paused`. Admins still see the note but keep working buttons so they can test checkout. Generation, sign-in and webhooks for existing orders keep working. `/api/me` exposes it as `config.notice.checkoutPaused`.
 
 Upgrading a site: merge upstream, then add `pricing.paused`, `pricing.pausedNote` and `errors.checkout_paused` to `src/content/en.ts` and `zh.ts` (typecheck lists them). Turn it on in `/admin/settings` when needed; no new vars, secrets or migrations.
 
-新增暂停收款：后台 `/admin/settings` 的新开关 `checkoutPaused`（“暂停收款”），支付商还没开通或临时出问题时用。打开后价格页的购买按钮变成不可点的“支付即将开放”，顶部显示说明，`POST /api/checkout` 返回 503 `checkout_paused`（管理员不受限）；生成、登录和已建订单的支付回调照常。`/api/me` 里是 `config.notice.checkoutPaused`。站点升级：合并 upstream 后，在 `src/content/en.ts`、`zh.ts` 补 `pricing.paused`、`pricing.pausedNote` 和 `errors.checkout_paused`（typecheck 会列出来），需要时在后台打开；没有新增 vars、密钥和迁移。
+新增暂停收款：后台 `/admin/settings` 的新开关 `checkoutPaused`（“暂停收款”），支付商还没开通或临时出问题时用。打开后价格页的购买按钮变成不可点的“支付即将开放”，顶部显示说明，`POST /api/checkout` 返回 503 `checkout_paused`；管理员也看到说明，但按钮照常可点，便于测试结账；生成、登录和已建订单的支付回调照常。`/api/me` 里是 `config.notice.checkoutPaused`。站点升级：合并 upstream 后，在 `src/content/en.ts`、`zh.ts` 补 `pricing.paused`、`pricing.pausedNote` 和 `errors.checkout_paused`（typecheck 会列出来），需要时在后台打开；没有新增 vars、密钥和迁移。
 
 ### Fixed: sign-in and checkout returns counted as traffic sources
 

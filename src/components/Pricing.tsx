@@ -18,8 +18,9 @@ export function Pricing() {
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const shortest = site.durations[0]!
-  // 后台暂停收款时按钮不可点；管理员照常，便于验证
-  const paused = !!config?.notice.checkoutPaused && user?.role !== 'admin'
+  // 后台暂停收款时所有人都看到说明；按钮只对管理员保持可点，便于验证
+  const checkoutPaused = !!config?.notice.checkoutPaused
+  const paused = checkoutPaused && user?.role !== 'admin'
 
   async function buy(packageId: string) {
     if (!user) {
@@ -70,7 +71,7 @@ export function Pricing() {
 
   return (
     <div className="space-y-6">
-      {paused ? (
+      {checkoutPaused ? (
         <p role="status" className="mx-auto max-w-2xl rounded-xl bg-amber-100 px-4 py-3 text-center text-sm text-amber-900 dark:bg-amber-900/40 dark:text-amber-200" data-testid="checkout-paused">
           {p.pausedNote}
         </p>

@@ -139,6 +139,12 @@ test('暂停收款：价格页按钮变成“支付即将开放”，下单返�
   await page.goto('/zh/pricing')
   await expect(page.getByTestId('buy-starter')).toHaveText(content.zh.pricing.paused)
   await expect(page.getByTestId('maintenance-notice')).toHaveCount(0)
+  // 管理员也看到暂停说明，否则会以为开关没生效；按钮保持可点，便于验证
+  await devLogin(page.request, ADMIN_EMAIL)
+  await page.goto('/pricing')
+  await expect(page.getByTestId('checkout-paused')).toBeVisible()
+  await expect(page.getByTestId('buy-starter')).toHaveText(content.en.pricing.buy)
+  await expect(page.getByTestId('buy-starter')).toBeEnabled()
 
   await setSettings({ checkoutPaused: false })
   await page.goto('/pricing')
