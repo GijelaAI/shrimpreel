@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test'
-import { PHOTO, ledger, uniqueEmail } from './helpers'
+import { PHOTO, durationCredits, ledger, pkg, uniqueEmail } from './helpers'
+
+const STARTER = pkg('starter').credits
+const SHORT = durationCredits('short')
 
 // 最小主路径：真实 UI 操作，mock 支付 + mock 生成，验证积分、视频、账单三处数据一致
 test('新用户：登录 → 购买 → 生成 → 个人中心看到视频与账单', async ({ page }, testInfo) => {
@@ -23,7 +26,7 @@ test('新用户：登录 → 购买 → 生成 → 个人中心看到视频与�
   await shot('02-mock-checkout')
   await page.getByTestId('mock-pay').click()
   await expect(page.getByTestId('checkout-result')).toHaveAttribute('data-status', 'paid')
-  await expect(page.getByTestId('nav-credits')).toHaveText('20 credits')
+  await expect(page.getByTestId('nav-credits')).toHaveText(`${STARTER} credits`)
   await shot('03-checkout-paid')
 
   await page.goto('/')
@@ -39,7 +42,7 @@ test('新用户：登录 → 购买 → 生成 → 个人中心看到视频与�
   // 成片带 AI 生成标识与保存期限提示
   await expect(page.getByTestId('generator').getByTestId('ai-badge')).toBeVisible()
   await expect(page.getByTestId('ai-notice')).toContainText('AI-generated')
-  await expect(page.getByTestId('nav-credits')).toHaveText('14 credits')
+  await expect(page.getByTestId('nav-credits')).toHaveText(`${STARTER - SHORT} credits`)
   await shot('04-generation-succeeded')
 
   await page.goto('/dashboard')
@@ -60,8 +63,8 @@ test('新用户：登录 → 购买 → 生成 → 个人中心看到视频与�
   await shot('06-billing')
   const entries = await ledger(page.request)
   expect(entries.map((e) => [e.reason, e.delta]).sort()).toEqual([
-    ['generation', -6],
-    ['purchase', 20],
+    ['generation', -SHORT],
+    ['purchase', STARTER],
   ])
 })
 

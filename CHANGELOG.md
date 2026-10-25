@@ -6,6 +6,14 @@ Notable changes to the template. Derived sites pick them up with `git merge` fro
 
 ## 2026-10-25
 
+### Fixed: e2e on sites with their own pricing
+
+- The e2e suite hard-coded the template's package and plan credits (starter 20, party 60, plans 60 a month), so a site that changed its pricing failed about 20 e2e tests in CI. Credits, prices, refund clawbacks and the yearly "Save X%" are now derived from `site` through helpers in `tests/e2e/helpers.ts` (`pkg`, `plan`, `durationCredits`, `clawbackCredits`, `yearlySavingPercent`). A few scenarios that need a specific relation between package and duration credits skip with a reason when the site's config can't build them.
+
+Upgrading a site: merge upstream; nothing else to do. The site's CI e2e should pass with its own pricing.
+
+修复：e2e 写死了模板的套餐和订阅积分（starter 20、party 60、订阅每月 60），站点改了定价后 CI 里约 20 个 e2e 失败。现在积分、价格、部分退款回收的积分和年付“Save X%”都通过 `tests/e2e/helpers.ts` 的 helper（`pkg`、`plan`、`durationCredits`、`clawbackCredits`、`yearlySavingPercent`）从 `site` 推算；少数依赖套餐与时长积分特定关系的场景，站点配置构造不出来时带原因跳过。站点升级：合并 upstream 即可，站点 CI 的 e2e 应按站点自己的定价通过。
+
 ### Added: switch the payment provider from the admin
 
 - A new runtime setting `paymentProvider` ("收款渠道" in `/admin/settings`): a dropdown that overrides `PAYMENT_PROVIDER` for new orders (Waffo, Dodo or Stripe; empty follows the deploy config). Saving checks the target provider's secrets, product IDs and key mode with the same rules as the launch check and rejects the save with the missing keys (never their values). Refunds, order lookups and subscription renewals or cancellations keep using each order's own provider, so keep every provider's webhook in place. The admin overview's config check and the payment connection test follow the effective provider; `npm run doctor` still checks only `PAYMENT_PROVIDER`. `/api/me` reports the effective provider.
