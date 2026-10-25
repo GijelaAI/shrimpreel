@@ -19,7 +19,7 @@ https://github.com/user-attachments/assets/895aab94-d0c9-474e-8d90-61a6c551e536
 > 状态：本地全流程可用（单元测试 + Playwright e2e），上面的站点已在生产环境运行。模板本身不部署。哪些已用真实服务验证、哪些还没有，见 [ROADMAP.md](ROADMAP.md)。
 
 - 前端/SSR：TanStack Start（React 19）+ Tailwind 4，`/` 英文、`/zh` 中文
-- API：Hono（`/api/*`、`/media/*`、`/sitemap.xml`、`/robots.txt`、IndexNow key 文件），入口 `src/server.ts`
+- API：Hono（`/api/*`、`/media/*`、`/sitemap.xml`、`/robots.txt`、`/llms.txt`、IndexNow key 文件），入口 `src/server.ts`
 - 支付：Waffo Pancake（默认）、Dodo Payments，均为 MoR；也可用 Stripe（你自己是商户，销售税自己处理）；`mock` 仅用于本地和 e2e
 - 视频：fal.ai queue API（默认），可选 [yir.ai](https://yir.ai/?ref=qianshuixia) 网关或 [NanoAPI](https://nanoapi.ai)；`mock` 仅用于本地和 e2e。见下文“视频服务商”
 - 已具备：
@@ -80,7 +80,7 @@ npm run dev -- --host 127.0.0.1      # http://127.0.0.1:3000
    - `package.json`：`name`。
    - 删除 `wrangler.staging.jsonc`（模板自身的预发配置）。
 
-   积分包价格（`packages`）、订阅开关和套餐（`subscriptionsEnabled`、`plans`，开关设为 `false` 只卖积分包）、`durations`、`video.falModel` 按需在 `src/config/site.ts` 手改。套餐可加 `anchorPriceCents` 显示划线原价和折扣，只能填这个套餐真实卖过的价格（欧盟按降价前 30 天内最低价算），新站一般不填。
+   积分包价格（`packages`）、订阅开关和套餐（`subscriptionsEnabled`、`plans`，开关设为 `false` 只卖积分包）、`durations`、`video.falModel` 按需在 `src/config/site.ts` 手改。套餐可加 `anchorPriceCents` 显示划线原价和折扣，只能填这个套餐真实卖过的价格（欧盟按降价前 30 天内最低价算），新站一般不填。价格页每个包显示“可做 N 条 X 秒或 M 条 Y 秒视频”（买得起的最长和最短时长），包数是 2 或 4 时网格按包数排列。可以加一个正好够最短时长的单条包（如 6 积分 $4.99）给只想做一条的人；余额不足时生成器的主按钮直接下单够用的最便宜的包，不用先跳价格页。
 3. **改文案**：`src/content/en.ts`、`src/content/zh.ts`。文案通过 `{keyword}` 等变量套用。每个词至少要重写 hero、whatIs、ideas、FAQ 和两篇文章，首页正文要自然覆盖长尾词。首页的痛点（`problem`）和对比（`withWithout`）区块按新趋势改，写不出真实内容就设为 `null`，不渲染。整站只换关键词会被 Google 判为 [scaled content abuse](https://developers.google.com/search/docs/essentials/spam-policies#scaled-content)。
    - **文章**：在 `site.ts` 的 `articles` 加一项（`key`、`slug`、发布和更新日期，可选 `related`），再在每种语言的 `articles` 里补同名 key，缺了 typecheck 会报错。文章页地址是 `/<slug>`，自动进入 `/guides` 列表、sitemap 和其它文章的“相关文章”。`trend`、`howTo` 两篇被首页直接链接，不要删。建议每站至少一篇 1,200 词以上的支柱页，加 4–6 篇长尾页（教程、灵感、排错、对比）。
    - 文案按语言拆包，浏览器只下载当前语言（含法律页全文）。组件里照常用 `getContent(locale)`；只有在根路由之外、渲染之前要用文案时，才需要先 `await loadContent(locale)`。
@@ -367,6 +367,7 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 | 生成失败率 | 最近 1 小时完成的任务里失败 ≥ 3 个且占比 ≥ 30%（不含管理员手动失败、举报下架） | `/admin/generations` |
 | 死信 | 最近 1 小时有任务因队列消息重试耗尽被判失败 | `/admin/generations` |
 | 视频服务商账户 | 最近 1 小时有任务因没配密钥、密钥失效、yir、NanoAPI 余额不足或 Key 月度额度用完而失败（1 个就告警） | `/admin/generations` |
+| 视频服务商余额 | 每小时（UTC 整点那次 Cron）查一次 yir、NanoAPI、fal 的余额，低于 10 美元就告警，不等任务失败；查询失败只写日志 | `/admin/generations` |
 | 任务积压 | 有任务创建超过 30 分钟仍未完成 | `/admin/generations` |
 | 支付回调 | 最近 24 小时有处理失败的支付回调 | `/admin/events` |
 | 付款待核对 | 最近 24 小时有 paid 回调找不到订单，或金额、币种、商品和订单不一致（订单补单或退款后不再计入） | `/admin/events` |
@@ -375,8 +376,8 @@ SMOKE_BASE_URL=https://video-template-staging.<子域名>.workers.dev SMOKE_EXPE
 - **去重**：同一类告警每 6 小时（UTC 时间桶）最多发一次，`dedupe_key` 为 `admin_alert:<类型>:<桶>:<管理员邮箱>`。问题持续存在时，下一个时间桶再提醒。
 - **死信队列**：主队列消息重试 10 次（约 35 分钟）仍失败会进入 `<name>-jobs-dlq`。同一个 Worker 消费死信队列（`src/server.ts` 按队列名的 `-dlq` 后缀分流），把任务判为失败（`error_code = dead_letter`）并退积分，用户会收到生成失败邮件。新站点要同时创建两个队列（见“部署到 Cloudflare”），`new-site.mjs` 会一并改名。
 - **D1 备份失败**：不在上表的健康检查里；当天第 3 次导出仍失败时发一封 `backup_failed` 告警，见“合规与内容安全”的“数据库备份”。
-- **付款即时通知**：配置 secret `PAYMENT_NOTIFY_WEBHOOK_URL` 后，每笔订单首次入账（含续费和后台补单）往 Telegram、飞书 / Lark、Discord 或 Slack 群发一条消息：金额、套餐、积分、来源和订单号。地址格式见 [docs/env.md](docs/env.md)。发送失败只写日志，不影响入账；日志和报错里不出现 webhook 地址（里面带 token）。
-- 发信本身出问题（域名未验证、配额用完）时告警邮件也可能发不出去，此时以 Workers 日志里的 `[alert]` 为准。需要第二通道时，可以用 Workers Logpush 把日志推到外部监控服务，按 `[alert]` 设置通知。
+- **付款即时通知**：配置 secret `PAYMENT_NOTIFY_WEBHOOK_URL` 后，每笔订单首次入账（含续费和后台补单）往 Telegram、飞书 / Lark、Discord 或 Slack 群发一条消息：金额、套餐、积分、来源和订单号。地址格式见 [docs/env.md](docs/env.md)。发送失败只写日志，不影响入账；日志和报错里不出现 webhook 地址（里面带 token）。同一个地址也会收到上表的告警和 D1 备份失败（同一类告警每个时间桶一条，用 KV 去重）；飞书开了关键词校验时要加上“告警”。
+- 发信本身出问题（域名未验证、配额用完）时告警邮件也可能发不出去，此时以 Workers 日志里的 `[alert]` 为准。配了 `PAYMENT_NOTIFY_WEBHOOK_URL` 时聊天群就是第二通道；还要第三条通道时，可以用 Workers Logpush 把日志推到外部监控服务，按 `[alert]` 设置通知。
 - **前端错误**：浏览器里未捕获的异常、未处理的 Promise 拒绝和错误页渲染失败，由 `src/lib/error-report.ts` 用 `sendBeacon` 发到 `/api/client-error`，只写 Workers 日志：`[client-error] id=… kind=error|rejection|boundary page=… message=… stack=…`。
   - 错误页显示错误编号，用户反馈时在 Workers Logs 里搜 `id=<编号>` 即可找到堆栈。
   - 日志里邮箱打码，URL 去掉账号密码、query 和 hash，堆栈只留前 6 行；同一页面同一个错误只报一次，每页最多 5 条，接口按 IP 限流。跨域脚本的 `Script error.` 不报。
@@ -396,8 +397,8 @@ SANDBOX_PROVIDER=dodo E2E_PORT=3200 npm run test:sandbox   # 支付商 test 模�
 
 按风险分级的 e2e 验收目录和未覆盖项见 [tests/e2e/CATALOG.md](tests/e2e/CATALOG.md)。新增或改名用例时要同步更新，`npm test` 会核对两边是否一致。sandbox e2e 的前提、webhook 模式和测试卡见 [docs/payments.md](docs/payments.md) 的“sandbox e2e”。
 
-e2e 覆盖（64 个用例）：
-- 购买与生成：完整主路径（含中文站路径和 AI 角标）、支付失败、未登录回到结果页（邮箱在渲染前被 302 去掉）、余额不足、生成失败退款；3 路轮询并发处理同一任务时只落库一次、成片不被误删，后台显示成本与毛利。
+e2e 覆盖（70 个用例）：
+- 购买与生成：完整主路径（含中文站路径和 AI 角标）、余额不足时在生成器里直接买够用的最便宜的包（暂停收款时禁用）、支付失败、未登录回到结果页（邮箱在渲染前被 302 去掉）、余额不足、生成失败退款；3 路轮询并发处理同一任务时只落库一次、成片不被误删，后台显示成本与毛利。
 - 合规：
   - 保留期：进行中任务的原图不清理；到期原图不能再用；成片过期返回 410，个人中心显示已过期；重复清理是幂等的。
   - 举报下架：匿名在 `/report` 举报，管理员在后台下架。同一张原图的两条成片都被删除，无关成片保留，重新上传同一张图被拦截；已处理的举报不能再处理，处理结果写入审计。

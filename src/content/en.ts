@@ -93,6 +93,8 @@ export function en(s: S) {
       ctaSignUp: 'Sign up free and start',
       ctaGenerate: (n: number) => `Generate video · ${n} credits`,
       ctaBuy: 'Get credits to generate',
+      ctaBuyPack: (credits: number, price: string) => `Get ${credits} credits · ${price}`,
+      seePacks: 'See all packs',
       balance: (n: number) => `Balance: ${n} credits`,
       needMore: (n: number) => `You need ${n} more credits for this length.`,
       needPhoto: 'Add a photo first.',
@@ -200,7 +202,8 @@ export function en(s: S) {
       paused: 'Payments opening soon',
       pausedNote: 'We’re finishing setup with our payment partner, so purchases aren’t open yet. Check back soon.',
       credits: (n: number) => `${n} credits`,
-      approx: (videos: number, seconds: number) => `≈ ${videos} videos of ${seconds} s`,
+      makes: (items: { videos: number; seconds: number }[]) =>
+        `Makes ${items.map((i) => `${i.videos} × ${i.seconds}s`).join(' or ')} ${items.length === 1 && items[0]!.videos === 1 ? 'video' : 'videos'}`,
       bullets: ['Credits never expire', 'All video lengths', 'HD MP4 download, no watermark', 'Automatic refund on failed renders'],
       note: 'Prices in USD. Taxes are calculated at checkout by our payment partner.',
       // 价格页底部的教程链接

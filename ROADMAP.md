@@ -147,7 +147,7 @@
    - ~~#8~~ 已完成（2026-10-21）。邀请奖励（只发积分，不发现金），见下文。
    - ~~#10~~ 已完成（2026-10-21）。后台运营参数与服务商连接测试（密钥不进数据库），见下文。
    - ~~#7~~ 已完成（2026-10-21）。订阅（月付、年付），见下文。
-4. P2 按需：运维脚本、~~群聊付款通知~~（已完成，见下文）、营销邮件订阅、多家统计、在线客服、`llms.txt`、协作模板、Demo 模式、RBAC、只读的“以用户身份查看”、AdSense 开关、回信转发、仅邀请注册、注册来源问卷、dependabot。
+4. P2 按需：运维脚本、~~群聊付款通知~~（已完成，见下文）、营销邮件订阅、多家统计、在线客服、~~`llms.txt`~~（已完成，见 #36）、协作模板、Demo 模式、RBAC、只读的“以用户身份查看”、AdSense 开关、回信转发、仅邀请注册、注册来源问卷、dependabot。
 
 **#33 yir.ai 视频服务商**（群友建议，2026-10-21 评估并接入）
 
@@ -191,6 +191,16 @@
 - 前端：生成器多于一种风格时在时长上方出现风格单选（`?style=<id>` 预选）；首页 hero 加风格标签（`tablist`，方向键可用）并与生成器同步；“Made with”每种风格一行（服务端渲染）；`seo.ts` 用默认风格的素材。
 - 测试：`tests/unit/styles.test.ts`（id 不重复、sources 覆盖所有时长、en/zh 文案齐全）、yir 与 nanoapi 的按风格 prompt、两步走判断、`jobs.test.ts` 风格缺失时失败；e2e 2 个（API 的默认风格与 `invalid_style`；多风格站点的标签、选择和记录，模板只有一种风格时跳过）。
 - 未验证：多风格界面只在临时加第二个风格的配置下跑过 e2e，模板默认仍是一种风格；真实 provider 没有按风格实测。
+
+**#36 转化、GEO 与告警通道**（2026-10-25，按 web.cafe 新词站复盘的结论）
+
+- 付费墙放在想生成的那一刻：已登录且余额不足时，生成器主按钮直接下单够用的最便宜的积分包（`cheapestPackageCovering`），下方链接到价格页；没有够用的包时仍跳价格页。下单逻辑抽成 `src/lib/checkout.ts` 的 `useCheckout`，价格页和生成器共用，暂停收款规则不变。
+- 价格页：`pricing.approx` 换成 `pricing.makes`，按 `packageMakes` 列出买得起的最长和最短时长各能做几条；网格列数按包数（2、3、4）排列。单条包（正好一条最短时长）由站点在 `site.packages` 里加。
+- `/llms.txt`：由 `site` 和英文文案生成（关键事实、页面、指南、条款），`seo:check` 和线上 smoke 检查它。复盘里没有证据表明它带来推荐，作为低成本项。
+- 告警通道：所有告警和 D1 备份失败同时发到 `PAYMENT_NOTIFY_WEBHOOK_URL`（KV 去重）；新增“视频服务商余额”告警，每小时查一次，低于 10 美元告警。余额查询抽成 `src/server/video-balance.ts`，测试连接共用。
+- 测试：`tests/unit/pricing.test.ts`（`packageMakes`、`cheapestPackageCovering`）、`tests/unit/llms.test.ts`、`tests/unit/alerts.test.ts`（余额阈值、聊天群去重）；e2e 2 个（生成器就地购买到积分到账；暂停收款时就地购买禁用）。
+- 未验证：线上聊天群实际收到告警（飞书关键词）；余额告警在真实 yir 账户上触发。
+
 **#6 积分分批次与过期**（2026-10-21）
 
 - 迁移 `0009_credit_grants.sql`：批次表 `credit_grants`、扣减明细 `credit_allocations`、断言表 `credit_guard`；现有余额转成永不过期的 `legacy` 批次。
@@ -224,7 +234,7 @@
 - 迁移 `0012_settings.sql`：`settings`（key、JSON 值、修改人、修改时间），另给 `generations.created_at` 加索引供每日上限计数。
 - 参数（`src/server/settings.ts`，后台 `/admin/settings`）：维护模式、暂停收款、收款渠道、各语言全站公告、注册赠送积分与有效期、邀请奖励积分、全站每日生成上限。只存和 `site.ts` 不同的值，保存成默认值时删行；读取走 KV（`settings:v1`，`cacheTtl` 60 秒），保存时用 D1 当前值刷新 KV；存值不合法或字段已删除时回退默认值。每次修改写审计，记录前后值；只写有变化的项。
 - 生效点：维护模式拦生成和下单（503，管理员放行），支付回调、登录、查看照常；暂停收款只拦下单（503 `checkout_paused`，管理员放行），价格页按钮显示“支付即将开放”；收款渠道覆盖 `PAYMENT_PROVIDER`，只影响新订单（下单、`/api/me`、后台配置检查和支付测试连接），保存前用 `checkConfig` 检查目标支付商，旧订单按 `getOrderProvider` 找原支付商；公告和维护提示经 `/api/me` 下发；每日上限按 UTC 自然日计数，预检查给出 429，并发由 batch 里的 `credit_guard` 断言兜底；注册赠送、邀请奖励改读运营参数。`site.referralRewardCredits` 为 0 时邀请奖励锁定为 0（隐私政策按 `site.ts` 生成）；运营参数设为 0 时暂停邀请，暂停期间付款的首单记为 `paused` 拒绝，恢复后不会用之后的订单补发。
-- 测试连接（`src/server/probes.ts`）：R2、KV 写读删；发信给管理员发测试邮件；Dodo 逐个套餐查商品核对价格和币种（低于 `site.ts` 为失败，因为付款会被判金额不符）；Waffo 用不存在的订单号查单验证签名；fal、yir 查余额（低于 5 美元提示，fal Key 没有 billing 权限时只提示）；OpenAI 查审核模型。只读或自行清理，说明里的密钥值替换为 `***`，每次测试写审计。
+- 测试连接（`src/server/probes.ts`）：R2、KV 写读删；发信给管理员发测试邮件；Dodo 逐个套餐查商品核对价格和币种（低于 `site.ts` 为失败，因为付款会被判金额不符）；Waffo 用不存在的订单号查单验证签名；fal、yir 查余额（低于 10 美元提示，2026-10-25 起与余额告警共用阈值，fal Key 没有 billing 权限时只提示）；OpenAI 查审核模型。只读或自行清理，说明里的密钥值替换为 `***`，每次测试写审计。
 - 测试：`tests/unit/settings.test.ts`（提交校验、合并、KV 缓存、每日上限在 SQLite 上回滚）、`tests/unit/probes.test.ts`（各服务商分支与脱敏）、`tests/unit/referrals.test.ts` 新增暂停用例；e2e `settings.spec.ts` 6 个（权限与校验、注册赠送与审计、维护模式、公告、每日上限、后台页面与测试连接）。另用 `.dev.vars` 的 test 凭据实测 Dodo、Waffo 的支付探测，结果都是正常，输出里没有密钥值。
 - 测试单元的 D1 外壳补了 `first(column)` 语义和 KV 外壳；`admin.spec.ts` 的密钥泄露检查原来只去双引号，`.dev.vars` 里单引号的值实际没被检查，已修正。
 - 未验证：线上 D1 执行迁移 0012（需要 `npm run db:migrate:remote`）；线上 KV `cacheTtl` 60 秒的实际生效延迟；fal、yir、OpenAI 的真实探测（需要真实 key）；真实发信的测试邮件投递。
@@ -284,7 +294,7 @@
    - C2PA 加成片内烧录水印：本地技术验证已完成。接下来在 Docker 里实测，再接入 Worker（`POSTPROCESS_PROVIDER`，默认关闭，因为开启后 deploy 需要 Docker 和 Workers Paid）；生产签名证书见 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 的 P0-1。
    - 未成年人和名人检测：OpenAI 的图片类别不覆盖这两类。
 3. P1：
-   - 首单转化：首次免费生成一次带水印的短视频（依赖后处理水印），或增加低价体验包，二选一，都要配额防刷。
+   - 首单转化：2026-10-25 定为不做免费生成（成本高、易被刷），改用站点层的单条积分包和生成器就地购买（见 #36）；带水印的免费试用不再计划。
    - 分享页开放索引：目前一律 noindex，等有了人工挑选的优质成片再决定是否开放部分页面。
    - 上线时确认使用 Workers Paid，否则 D1 Time Travel 只有 7 天。
    - 错误追踪：前端错误目前只进 Workers Logs，堆栈是压缩后的行列号；需要 source map 还原或聚合告警时换成 Sentry。

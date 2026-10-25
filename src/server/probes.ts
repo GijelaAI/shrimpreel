@@ -1,5 +1,6 @@
 import type { Hono } from 'hono'
 import { sellingPlans, site } from '#/config/site'
+import { ALERT_RULES } from './alerts'
 import { emailConfig } from './email'
 import { audit, requireAdmin } from './http'
 import { getModerationProvider } from './moderation'
@@ -10,7 +11,7 @@ import { STRIPE_API_VERSION } from './payments/stripe'
 import { waffoEnvironment } from './payments/waffo'
 import type { AppContext, UserRow } from './types'
 import { ApiError, cleanSecret, createId, parseJsonRecord } from './util'
-import { activeVideoProviderId } from './video'
+import { queryVideoBalance } from './video-balance'
 
 // 后台“测试连接”：按当前配置对每个依赖做一次只读或可自行清理的探测，不建收银台、不提交生成任务。
 // 结果里只有状态和说明，不回显任何密钥（说明文字里出现的密钥值也会被替换掉）。
@@ -26,9 +27,6 @@ export interface ProbeResult {
   ms: number
 }
 type Outcome = { status: ProbeStatus; message: string }
-
-// 视频服务商余额低于这个数（美元）时提示
-const LOW_BALANCE_USD = 5
 
 const ok = (message: string): Outcome => ({ status: 'ok', message })
 const warn = (message: string): Outcome => ({ status: 'warn', message })
@@ -172,45 +170,19 @@ async function probeStripePrices(
 
 function balanceOutcome(amount: number, currency: string, provider: string) {
   const text = `${amount.toFixed(2)} ${currency}`
-  return amount < LOW_BALANCE_USD ? warn(`鉴权正常，但${provider}余额只剩 ${text}，请尽快充值`) : ok(`鉴权正常，余额 ${text}`)
+  return amount < ALERT_RULES.provider_balance.lowUsd ? warn(`鉴权正常，但 ${provider} 余额只剩 ${text}，请尽快充值`) : ok(`鉴权正常，余额 ${text}`)
 }
 
 async function probeVideo(env: Env): Promise<Outcome> {
-  const id = activeVideoProviderId(env)
-  if (id === 'mock') return ok('mock 视频服务商，不调用外部接口')
-  if (id === 'fal') {
-    const key = cleanSecret(env.FAL_KEY)
-    if (!key) return fail('FAL_KEY 未配置')
-    const response = await fetch('https://api.fal.ai/v1/account/billing?expand=credits', { headers: { Authorization: `Key ${key}` } })
-    if (response.status === 401) return fail('FAL_KEY 无效')
-    // Key 有效但权限范围不含 billing:usage:read：不影响生成，只是查不到余额
-    if (response.status === 403) return warn('FAL_KEY 有效，但没有 billing:usage:read 权限，查不到余额（不影响生成）')
-    if (!response.ok) return fail(`查询余额返回 HTTP ${response.status}`)
-    const body = (await response.json().catch(() => null)) as { credits?: { current_balance?: unknown; currency?: unknown } } | null
-    const balance = Number(body?.credits?.current_balance)
-    if (!Number.isFinite(balance)) return warn('鉴权正常，但读不到余额')
-    return balanceOutcome(balance, String(body?.credits?.currency ?? 'USD'), ' fal ')
-  }
-  if (id === 'nanoapi') {
-    const key = cleanSecret(env.NANOAPI_API_KEY)
-    if (!key) return fail('NANOAPI_API_KEY 未配置')
-    const response = await fetch('https://api.nanoapi.ai/v1/balance', { headers: { Authorization: `Bearer ${key}` } })
-    if (response.status === 401) return fail('NANOAPI_API_KEY 无效')
-    if (!response.ok) return fail(`查询余额返回 HTTP ${response.status}`)
-    const body = (await response.json().catch(() => null)) as { data?: { available?: unknown; currency?: unknown } } | null
-    const available = Number(body?.data?.available)
-    if (!Number.isFinite(available)) return warn('鉴权正常，但读不到余额')
-    return balanceOutcome(available, String(body?.data?.currency ?? 'USD'), ' NanoAPI ')
-  }
-  const key = cleanSecret(env.YIR_API_KEY)
-  if (!key) return fail('YIR_API_KEY 未配置')
-  const response = await fetch('https://gateway.yir.ai/v1/balance', { headers: { Authorization: `Bearer ${key}` } })
-  if (response.status === 401) return fail('YIR_API_KEY 无效')
-  if (!response.ok) return fail(`查询余额返回 HTTP ${response.status}`)
-  const body = (await response.json().catch(() => null)) as { available_amount?: unknown; currency?: unknown } | null
-  const available = Number(body?.available_amount)
-  if (!Number.isFinite(available)) return warn('鉴权正常，但读不到余额')
-  return balanceOutcome(available, String(body?.currency ?? 'USD'), ' yir ')
+  const result = await queryVideoBalance(env)
+  if (result.status === 'mock') return ok('mock 视频服务商，不调用外部接口')
+  if (result.status === 'no_key') return fail(`${result.keyName} 未配置`)
+  if (result.status === 'unauthorized') return fail(`${result.keyName} 无效`)
+  // Key 有效但权限范围不含 billing:usage:read：不影响生成，只是查不到余额
+  if (result.status === 'forbidden') return warn(`${result.keyName} 有效，但没有 billing:usage:read 权限，查不到余额（不影响生成）`)
+  if (result.status === 'http') return fail(`查询余额返回 HTTP ${result.code}`)
+  if (result.status === 'unreadable') return warn('鉴权正常，但读不到余额')
+  return balanceOutcome(result.amount, result.currency, result.provider)
 }
 
 async function probeModeration(env: Env): Promise<Outcome> {

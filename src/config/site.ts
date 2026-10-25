@@ -273,6 +273,22 @@ export function anchorPrice(pack: CreditPackage): { cents: number; percentOff: n
   return { cents: anchor, percentOff: Math.round((1 - pack.priceCents / anchor) * 100) }
 }
 
+// 积分包能做几条视频：列出“买得起的最长时长”和“最短时长”（相同则只列一项），没有买得起的时长时返回空数组
+export function packageMakes(credits: number): { videos: number; seconds: number }[] {
+  const affordable = site.durations.filter((d) => d.credits <= credits)
+  if (!affordable.length) return []
+  const bySeconds = [...affordable].sort((a, b) => a.seconds - b.seconds)
+  const shortest = bySeconds[0]!
+  const longest = bySeconds[bySeconds.length - 1]!
+  const items = longest === shortest ? [longest] : [longest, shortest]
+  return items.map((d) => ({ videos: Math.floor(credits / d.credits), seconds: d.seconds }))
+}
+
+// 积分 ≥ shortfall 的积分包里最便宜的一个（只看一次性积分包，不含订阅）；没有够用的返回 undefined
+export function cheapestPackageCovering(shortfall: number) {
+  return site.packages.filter((p) => p.credits >= shortfall).sort((a, b) => a.priceCents - b.priceCents)[0]
+}
+
 export type ArticleKey = (typeof site.articles)[number]['key']
 export interface Article {
   key: ArticleKey
