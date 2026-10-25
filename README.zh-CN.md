@@ -10,7 +10,13 @@ https://github.com/user-attachments/assets/895aab94-d0c9-474e-8d90-61a6c551e536
 
 72 秒功能介绍，无声（[英文版](README.md)；MP4 文件在 [docs/media](docs/media)）。画面来自本地运行，示例站 Neon Shuffle AI 和视频素材都是占位演示。
 
-> 状态：本地全流程可用（单元测试 + Playwright e2e），尚未作为正式站点部署。哪些已用真实服务验证、哪些还没有，见 [ROADMAP.md](ROADMAP.md)。
+## 用 ShrimpReel 做的站
+
+<a href="https://christmasdanceai.com/?utm_source=github&utm_medium=referral&utm_campaign=shrimpreel"><img src="docs/media/showcase-christmas-dance-ai.jpg" width="600" alt="Christmas Dance AI：一张照片生成精灵舞或圣诞派对舞视频"></a>
+
+[Christmas Dance AI](https://christmasdanceai.com/?utm_source=github&utm_medium=referral&utm_campaign=shrimpreel)：上传一张照片，变身小精灵在圣诞老人的工坊里跳舞，或穿自己的衣服跳圣诞派对舞。两种风格、Google 登录、积分包和订阅，都来自本模板。
+
+> 状态：本地全流程可用（单元测试 + Playwright e2e），上面的站点已在生产环境运行。模板本身不部署。哪些已用真实服务验证、哪些还没有，见 [ROADMAP.md](ROADMAP.md)。
 
 - 前端/SSR：TanStack Start（React 19）+ Tailwind 4，`/` 英文、`/zh` 中文
 - API：Hono（`/api/*`、`/media/*`、`/sitemap.xml`、`/robots.txt`、IndexNow key 文件），入口 `src/server.ts`

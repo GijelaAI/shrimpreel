@@ -6,6 +6,14 @@ Notable changes to the template. Derived sites pick them up with `git merge` fro
 
 ## 2026-10-25
 
+### Docs: showcase
+
+- Both READMEs get a "Built with ShrimpReel" section: a card image (`docs/media/showcase-christmas-dance-ai.jpg`) linking to Christmas Dance AI, the first live site built from the template. The status note now says a site runs in production.
+
+Upgrading a site: nothing to do. The section and the image arrive with the merge; a site can drop them from its own README.
+
+文档：README 两份新增“用 ShrimpReel 做的站”，用卡片图（`docs/media/showcase-christmas-dance-ai.jpg`）链接到第一个上线的站点 Christmas Dance AI；状态说明改为已有站点在生产环境运行。站点升级：无需操作，合并后会带上这一节和图片，站点可以在自己的 README 里删掉。
+
 ### Added: multiple dance styles
 
 - A site can offer several dance styles (for example an elf dance and a Christmas party dance). `site.styles[]` replaces `template.id`, `durations[].source`, `site.examples.original/aiVersions/madeWith` and the per-style parts of `site.video.yir.scene`. Each style has its own `id` (written to `generations.template_id`, don't change it once published), `sources` (one source video per `durations[].id`), optional `prompt` (overrides `video.yir.prompt` and `video.nanoapi.prompt`), optional `scene` (yir two-step `{ frame, prompt }`) and its `examples`. The first style is the default. `template` keeps only `aspectRatio` and `fullSeconds`; `site.examples` keeps only `ideas`; `site.video.yir.scene` is now `site.video.yir.sceneImage` (shared `model`, `resolution`, `aspectRatio`, `costCents`, `routingOnly`, always present), and a style runs two-step when its own `scene` is set.

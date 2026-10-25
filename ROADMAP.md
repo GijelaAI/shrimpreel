@@ -277,8 +277,8 @@
 
 按上面的“模板增强计划”推进（第一、二、三批已完成，剩 P2 按需项）。其余事项按 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 的“建议顺序”推进：
 
-1. 部署第一个热词站：
-   - 线上验证绑定、Google 登录、支付 test webhook，并用 fal 跑一次真实生成。
+1. 第一个热词站 [Christmas Dance AI](https://christmasdanceai.com) 已于 2026-10-24 上线（yir 两步走，2026-10-25 加精灵舞风格），线上 smoke 9/9、`seo:check` 0 error；README 两份的“用 ShrimpReel 做的站”用卡片图 `docs/media/showcase-christmas-dance-ai.jpg` 展示它。剩余：
+   - 线上真实付款和真实生成未验证（支付只在 Dodo、Waffo 沙盒跑过）。
    - 运行 `npm run seo:check -- --base https://<domain> --production` 和 `/seo-audit https://<domain>`（含 Core Web Vitals）。
 2. P0 剩余项：
    - C2PA 加成片内烧录水印：本地技术验证已完成。接下来在 Docker 里实测，再接入 Worker（`POSTPROCESS_PROVIDER`，默认关闭，因为开启后 deploy 需要 Docker 和 Workers Paid）；生产签名证书见 [docs/SAAS_VIDEO_FEATURES.md](docs/SAAS_VIDEO_FEATURES.md) 的 P0-1。

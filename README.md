@@ -10,7 +10,13 @@ https://github.com/user-attachments/assets/ce92074a-2a09-4a3e-b750-4b888d12abf8
 
 A 72-second tour, no sound ([Chinese version](README.zh-CN.md); MP4 files in [docs/media](docs/media)). Screens are from a local run; the demo site "Neon Shuffle AI" and its clips are placeholders.
 
-> Status: the full flow works locally (unit tests + Playwright e2e). It has not been deployed as a production site yet; [ROADMAP.md](ROADMAP.md) lists what has and hasn't been verified against real services. Code comments, ROADMAP and `docs/` are currently in Chinese.
+## Built with ShrimpReel
+
+<a href="https://christmasdanceai.com/?utm_source=github&utm_medium=referral&utm_campaign=shrimpreel"><img src="docs/media/showcase-christmas-dance-ai.jpg" width="600" alt="Christmas Dance AI: one photo turned into an elf dance or a Christmas party dance video"></a>
+
+[Christmas Dance AI](https://christmasdanceai.com/?utm_source=github&utm_medium=referral&utm_campaign=shrimpreel): upload one photo and dance as an elf in Santa's workshop, or at a Christmas party in your own outfit. Two styles, Google sign-in, credit packs and subscriptions, all from this template.
+
+> Status: the full flow works locally (unit tests + Playwright e2e), and the site above runs it in production. The template itself is not deployed; [ROADMAP.md](ROADMAP.md) lists what has and hasn't been verified against real services. Code comments, ROADMAP and `docs/` are currently in Chinese.
 
 - Frontend/SSR: TanStack Start (React 19) + Tailwind 4. English at `/`, Chinese at `/zh`.
 - API: Hono (`/api/*`, `/media/*`, `/sitemap.xml`, `/robots.txt`, IndexNow key file); entry point `src/server.ts`.
