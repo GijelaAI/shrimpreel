@@ -8,7 +8,7 @@ type SettingsView = {
   defaults: Record<string, unknown>
   overrides: Array<{ key: string; updatedBy: string | null }>
 }
-type AuditEntry = { action: string; target_type: string; target_id: string; detail: string | null; admin_email: string }
+type AuditEntry = { id: string; action: string; target_type: string; target_id: string; detail: string | null; admin_email: string }
 
 let admin: APIRequestContext
 
@@ -151,6 +151,27 @@ test('暂停收款：价格页按钮变成“支付即将开放”，下单返�
   await expect(page.getByTestId('buy-starter')).toHaveText(content.en.pricing.buy)
   await expect(page.getByTestId('buy-starter')).toBeEnabled()
   await expect(page.getByTestId('checkout-paused')).toHaveCount(0)
+})
+
+test('收款渠道：非法渠道连同其它改动整体拒绝、不记审计，下单仍走部署配置；后台下拉显示当前 PAYMENT_PROVIDER', async ({ page, request }) => {
+  // 目标支付商配置不全时拒绝切换由 tests/unit/settings.test.ts 覆盖：本地 .dev.vars 各家配得是否齐全因人而异
+  const latestAudit = (await auditEntries())[0]?.id
+  const rejected = await json<{ message: string }>(post(admin, '/api/admin/settings', { values: { paymentProvider: 'paypal', maintenance: true } }), 400)
+  expect(rejected.message).toContain('收款渠道')
+  const view = await json<SettingsView>(admin.get('/api/admin/settings'))
+  expect(view.values).toMatchObject({ paymentProvider: '', maintenance: false })
+  expect((await auditEntries())[0]?.id).toBe(latestAudit)
+
+  await devLogin(request, uniqueEmail('provider'))
+  const { url } = await json<{ url: string }>(post(request, '/api/checkout', { packageId: 'starter', locale: 'en' }))
+  expect(url).toContain('/checkout/mock')
+
+  await devLogin(page.request, ADMIN_EMAIL)
+  await page.goto('/admin/settings')
+  const select = page.getByTestId('setting-paymentProvider')
+  await expect(select.locator('option').first()).toHaveText('跟随部署配置（PAYMENT_PROVIDER=mock）')
+  await expect(select.locator('option')).toHaveText(['跟随部署配置（PAYMENT_PROVIDER=mock）', 'Waffo', 'Dodo Payments', 'Stripe'])
+  await expect(select).toHaveValue('')
 })
 
 test('全站公告按语言显示，提交时压成一行；清空后不显示', async ({ page }) => {

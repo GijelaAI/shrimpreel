@@ -4,6 +4,7 @@ import { emailConfig } from './email'
 import { audit, requireAdmin } from './http'
 import { getModerationProvider } from './moderation'
 import { activePaymentProviderId, getPaymentProvider } from './payments'
+import { getSettings } from './settings'
 import { dodoBaseUrl } from './payments/dodo'
 import { STRIPE_API_VERSION } from './payments/stripe'
 import { waffoEnvironment } from './payments/waffo'
@@ -68,8 +69,8 @@ async function probeEmail(env: Env, admin: UserRow): Promise<Outcome> {
   return ok(`已从 ${config.from.email} 发到 ${admin.email}（${messageId}），请到收件箱确认`)
 }
 
-async function probePayment(env: Env): Promise<Outcome> {
-  const id = activePaymentProviderId(env)
+async function probePayment(env: Env, override: string): Promise<Outcome> {
+  const id = activePaymentProviderId(env, override)
   if (id === 'mock') return ok('mock 支付，不调用外部接口')
   const products = parseJsonRecord(id === 'dodo' ? env.DODO_PRODUCTS : id === 'stripe' ? env.STRIPE_PRODUCTS : env.WAFFO_PRODUCTS)
   // 积分包和订阅套餐都要有商品
@@ -77,7 +78,7 @@ async function probePayment(env: Env): Promise<Outcome> {
   const missing = items.filter((pack) => !products[pack.id]).map((pack) => pack.id)
   if (id === 'waffo') {
     // 用不存在的订单号查一次付款：能返回空列表说明商户号、私钥和签名都正确
-    await getPaymentProvider(env).fetchPaidEvent!({ id: `probe_${createId('prb')}`, packageId: '', providerSessionId: null })
+    await getPaymentProvider(env, override).fetchPaidEvent!({ id: `probe_${createId('prb')}`, packageId: '', providerSessionId: null })
     const base = `签名和鉴权正常（${waffoEnvironment(env)} 环境）；Waffo 没有按商品查价格的接口，价格请在 Waffo 后台核对`
     return missing.length ? fail(`WAFFO_PRODUCTS 缺少套餐：${missing.join('、')}。${base}`) : ok(base)
   }
@@ -247,18 +248,20 @@ function redact(message: string, env: Env) {
 
 export async function runProbe(env: Env, target: ProbeTarget, admin: UserRow): Promise<ProbeResult> {
   const started = Date.now()
+  // 支付按后台“收款渠道”实际生效的支付商测试
+  const paymentOverride = target === 'payment' ? (await getSettings(env)).paymentProvider : ''
   let outcome: Outcome
   try {
     if (target === 'storage') outcome = await probeStorage(env)
     else if (target === 'kv') outcome = await probeKv(env)
     else if (target === 'email') outcome = await probeEmail(env, admin)
-    else if (target === 'payment') outcome = await probePayment(env)
+    else if (target === 'payment') outcome = await probePayment(env, paymentOverride)
     else if (target === 'video') outcome = await probeVideo(env)
     else outcome = await probeModeration(env)
   } catch (error) {
     outcome = fail(error instanceof Error ? error.message : String(error))
   }
-  return { target, provider: PROVIDER_LABEL[target](env), status: outcome.status, message: redact(outcome.message, env), ms: Date.now() - started }
+  return { target, provider: target === 'payment' && paymentOverride ? paymentOverride : PROVIDER_LABEL[target](env), status: outcome.status, message: redact(outcome.message, env), ms: Date.now() - started }
 }
 
 export function registerProbeAdminRoutes(routes: Hono<AppContext>) {

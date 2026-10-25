@@ -6,6 +6,14 @@ Notable changes to the template. Derived sites pick them up with `git merge` fro
 
 ## 2026-10-25
 
+### Added: switch the payment provider from the admin
+
+- A new runtime setting `paymentProvider` ("收款渠道" in `/admin/settings`): a dropdown that overrides `PAYMENT_PROVIDER` for new orders (Waffo, Dodo or Stripe; empty follows the deploy config). Saving checks the target provider's secrets, product IDs and key mode with the same rules as the launch check and rejects the save with the missing keys (never their values). Refunds, order lookups and subscription renewals or cancellations keep using each order's own provider, so keep every provider's webhook in place. The admin overview's config check and the payment connection test follow the effective provider; `npm run doctor` still checks only `PAYMENT_PROVIDER`. `/api/me` reports the effective provider.
+
+Upgrading a site: merge upstream; nothing else to do. No new copy, vars, secrets or migrations. Only switch to a provider whose account is live and whose secrets are set on the site.
+
+新增后台切换收款渠道：后台 `/admin/settings` 新增运营参数 `paymentProvider`（“收款渠道”），用下拉框为新订单覆盖 `PAYMENT_PROVIDER`（Waffo、Dodo、Stripe；留空跟随部署配置）。保存前按上线检查的同一套规则检查目标支付商的密钥、商品 ID 和 Key 模式，配置不全就拒绝保存，并列出缺的键（不显示值）。退款、查单和订阅续费、取消仍按订单所属的支付商处理，所以各家的 webhook 都要保持开着。后台概览的配置检查和支付测试连接按实际生效的支付商检查；`npm run doctor` 仍只检查 `PAYMENT_PROVIDER`。`/api/me` 返回实际生效的支付商。站点升级：合并 upstream 即可，没有新增文案、vars、密钥和迁移；只切到账号已开通、密钥已配在站点上的支付商。
+
 ### Added: checkout pause
 
 - A new runtime setting `checkoutPaused` ("暂停收款" in `/admin/settings`) for a payment provider that isn't live yet or is temporarily broken. While it's on, the pricing page buttons show a disabled "Payments opening soon" with a note at the top, and `POST /api/checkout` returns 503 `checkout_paused`. Admins still see the note but keep working buttons so they can test checkout. Generation, sign-in and webhooks for existing orders keep working. `/api/me` exposes it as `config.notice.checkoutPaused`.

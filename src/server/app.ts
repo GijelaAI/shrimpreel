@@ -110,14 +110,15 @@ app.post(CLIENT_ERROR_PATH, async (c) => {
 
 app.get('/api/me', async (c) => {
   const user = c.get('user')
+  const settings = await getSettings(c.env)
   return c.json({
     user: user ? publicUser(user) : null,
     config: {
       googleClientId: googleClientId(c.env) ?? null,
       devLogin: !isProduction(c.env),
-      paymentProvider: c.env.PAYMENT_PROVIDER,
+      paymentProvider: settings.paymentProvider || c.env.PAYMENT_PROVIDER,
       turnstileSiteKey: turnstileSiteKey(c.env),
-      notice: publicNotice(await getSettings(c.env)),
+      notice: publicNotice(settings),
     },
   })
 })
@@ -481,7 +482,8 @@ app.post('/api/redeem', async (c) => {
 
 app.post('/api/checkout', async (c) => {
   const user = requireUser(c)
-  assertCheckoutOpen(await getSettings(c.env), user)
+  const settings = await getSettings(c.env)
+  assertCheckoutOpen(settings, user)
   await rateLimit(c.env.AUTH_LIMITER, `checkout:${user.id}`)
   const body = await readJson<{ packageId: string; locale: string }>(c)
   // packageId 可以是积分包或在售的订阅套餐（订阅开关关掉时套餐不能再下单）
@@ -491,7 +493,7 @@ app.post('/api/checkout', async (c) => {
   if (findPlan(pack.id) && (await liveSubscription(c.env.DB, user.id))) throw new ApiError(409, 'subscription_exists')
   const locale = isLocale(body.locale) ? body.locale : 'en'
   await rememberLocale(c.env, user, body.locale)
-  const provider = getPaymentProvider(c.env)
+  const provider = getPaymentProvider(c.env, settings.paymentProvider)
   const id = createId('ord')
   const now = nowIso()
   const attr = requestAttribution(c, 'last')

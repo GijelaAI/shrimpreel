@@ -222,8 +222,8 @@
 **#10 运营设置与测试连接**（2026-10-21）
 
 - 迁移 `0012_settings.sql`：`settings`（key、JSON 值、修改人、修改时间），另给 `generations.created_at` 加索引供每日上限计数。
-- 参数（`src/server/settings.ts`，后台 `/admin/settings`）：维护模式、暂停收款、各语言全站公告、注册赠送积分与有效期、邀请奖励积分、全站每日生成上限。只存和 `site.ts` 不同的值，保存成默认值时删行；读取走 KV（`settings:v1`，`cacheTtl` 60 秒），保存时用 D1 当前值刷新 KV；存值不合法或字段已删除时回退默认值。每次修改写审计，记录前后值；只写有变化的项。
-- 生效点：维护模式拦生成和下单（503，管理员放行），支付回调、登录、查看照常；暂停收款只拦下单（503 `checkout_paused`，管理员放行），价格页按钮显示“支付即将开放”；公告和维护提示经 `/api/me` 下发；每日上限按 UTC 自然日计数，预检查给出 429，并发由 batch 里的 `credit_guard` 断言兜底；注册赠送、邀请奖励改读运营参数。`site.referralRewardCredits` 为 0 时邀请奖励锁定为 0（隐私政策按 `site.ts` 生成）；运营参数设为 0 时暂停邀请，暂停期间付款的首单记为 `paused` 拒绝，恢复后不会用之后的订单补发。
+- 参数（`src/server/settings.ts`，后台 `/admin/settings`）：维护模式、暂停收款、收款渠道、各语言全站公告、注册赠送积分与有效期、邀请奖励积分、全站每日生成上限。只存和 `site.ts` 不同的值，保存成默认值时删行；读取走 KV（`settings:v1`，`cacheTtl` 60 秒），保存时用 D1 当前值刷新 KV；存值不合法或字段已删除时回退默认值。每次修改写审计，记录前后值；只写有变化的项。
+- 生效点：维护模式拦生成和下单（503，管理员放行），支付回调、登录、查看照常；暂停收款只拦下单（503 `checkout_paused`，管理员放行），价格页按钮显示“支付即将开放”；收款渠道覆盖 `PAYMENT_PROVIDER`，只影响新订单（下单、`/api/me`、后台配置检查和支付测试连接），保存前用 `checkConfig` 检查目标支付商，旧订单按 `getOrderProvider` 找原支付商；公告和维护提示经 `/api/me` 下发；每日上限按 UTC 自然日计数，预检查给出 429，并发由 batch 里的 `credit_guard` 断言兜底；注册赠送、邀请奖励改读运营参数。`site.referralRewardCredits` 为 0 时邀请奖励锁定为 0（隐私政策按 `site.ts` 生成）；运营参数设为 0 时暂停邀请，暂停期间付款的首单记为 `paused` 拒绝，恢复后不会用之后的订单补发。
 - 测试连接（`src/server/probes.ts`）：R2、KV 写读删；发信给管理员发测试邮件；Dodo 逐个套餐查商品核对价格和币种（低于 `site.ts` 为失败，因为付款会被判金额不符）；Waffo 用不存在的订单号查单验证签名；fal、yir 查余额（低于 5 美元提示，fal Key 没有 billing 权限时只提示）；OpenAI 查审核模型。只读或自行清理，说明里的密钥值替换为 `***`，每次测试写审计。
 - 测试：`tests/unit/settings.test.ts`（提交校验、合并、KV 缓存、每日上限在 SQLite 上回滚）、`tests/unit/probes.test.ts`（各服务商分支与脱敏）、`tests/unit/referrals.test.ts` 新增暂停用例；e2e `settings.spec.ts` 6 个（权限与校验、注册赠送与审计、维护模式、公告、每日上限、后台页面与测试连接）。另用 `.dev.vars` 的 test 凭据实测 Dodo、Waffo 的支付探测，结果都是正常，输出里没有密钥值。
 - 测试单元的 D1 外壳补了 `first(column)` 语义和 KV 外壳；`admin.spec.ts` 的密钥泄露检查原来只去双引号，`.dev.vars` 里单引号的值实际没被检查，已修正。

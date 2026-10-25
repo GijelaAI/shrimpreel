@@ -1,6 +1,7 @@
 import type { Hono } from 'hono'
 import { LOCALES, LOCALE_META, site, type Locale } from '#/config/site'
 import { audit, readJson, requireAdmin } from './http'
+import { paymentProviderProblems } from './runtime-config'
 import type { AppContext, UserRow } from './types'
 import { ApiError, nowIso } from './util'
 
@@ -11,6 +12,7 @@ import { ApiError, nowIso } from './util'
 export type RuntimeSettings = {
   maintenance: boolean
   checkoutPaused: boolean
+  paymentProvider: string
   signupBonusCredits: number
   signupBonusValidDays: number
   referralRewardCredits: number
@@ -24,6 +26,7 @@ export type SettingField =
   | (FieldBase & { kind: 'bool' })
   | (FieldBase & { kind: 'int'; min: number; max: number })
   | (FieldBase & { kind: 'text'; maxLength: number })
+  | (FieldBase & { kind: 'select'; options: Array<{ value: string; label: string }> })
 
 const referralOn = site.referralRewardCredits > 0
 
@@ -39,6 +42,18 @@ export const SETTING_FIELDS: readonly SettingField[] = [
     kind: 'bool',
     label: '暂停收款',
     help: '支付商还没开通或临时出问题时打开：价格页的购买按钮变成“支付即将开放”，新下单返回 503。生成、已建订单的支付回调照常；管理员不受限制，便于验证',
+  },
+  {
+    key: 'paymentProvider',
+    kind: 'select',
+    options: [
+      { value: '', label: '跟随部署配置（PAYMENT_PROVIDER）' },
+      { value: 'waffo', label: 'Waffo' },
+      { value: 'dodo', label: 'Dodo Payments' },
+      { value: 'stripe', label: 'Stripe' },
+    ],
+    label: '收款渠道',
+    help: '新订单用哪家支付商收款，保存前会检查它的密钥和商品 ID 是否齐全。已有订单的退款、查单和订阅续费、取消仍走原支付商；各家的 webhook 都保持开着',
   },
   ...LOCALES.map(
     (locale): SettingField => ({
@@ -74,6 +89,7 @@ export const SETTING_FIELDS: readonly SettingField[] = [
 export const DEFAULT_SETTINGS: RuntimeSettings = {
   maintenance: false,
   checkoutPaused: false,
+  paymentProvider: '',
   ...(Object.fromEntries(LOCALES.map((locale) => [`announcement.${locale}`, ''])) as Record<`announcement.${Locale}`, string>),
   signupBonusCredits: site.signupBonusCredits,
   signupBonusValidDays: site.signupBonusValidDays,
@@ -87,6 +103,7 @@ const fieldOf = (key: string) => SETTING_FIELDS.find((f) => f.key === key)
 function isValid(field: SettingField, value: unknown) {
   if (field.kind === 'bool') return typeof value === 'boolean'
   if (field.kind === 'int') return Number.isInteger(value) && (value as number) >= field.min && (value as number) <= field.max
+  if (field.kind === 'select') return field.options.some((option) => option.value === value)
   return typeof value === 'string' && value.length <= field.maxLength
 }
 
@@ -113,7 +130,13 @@ export function parseSettingsPatch(input: unknown): Partial<RuntimeSettings> {
     const value = field.kind === 'text' && typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : raw
     if (!isValid(field, value)) {
       const rule =
-        field.kind === 'int' ? `${field.min}–${field.max} 的整数` : field.kind === 'text' ? `不超过 ${field.maxLength} 个字符` : '开或关'
+        field.kind === 'int'
+          ? `${field.min}–${field.max} 的整数`
+          : field.kind === 'text'
+            ? `不超过 ${field.maxLength} 个字符`
+            : field.kind === 'select'
+              ? `以下之一：${field.options.map((option) => option.value || '(空)').join('、')}`
+              : '开或关'
       throw new ApiError(400, 'invalid_setting', `${field.label}：应为${rule}`)
     }
     patch[key] = value
@@ -180,7 +203,16 @@ export function publicNotice(settings: RuntimeSettings) {
   }
 }
 
-async function adminView(db: D1Database) {
+// “跟随部署配置”选项显示当前的 PAYMENT_PROVIDER，切换时能看出默认是哪家
+const fieldsFor = (env: Env) =>
+  SETTING_FIELDS.map((field) =>
+    field.kind === 'select' && field.key === 'paymentProvider'
+      ? { ...field, options: field.options.map((o) => (o.value ? o : { ...o, label: `跟随部署配置（PAYMENT_PROVIDER=${env.PAYMENT_PROVIDER || '未配置'}）` })) }
+      : field,
+  )
+
+async function adminView(env: Env) {
+  const db = env.DB
   const [values, meta] = await Promise.all([
     loadStored(db),
     db
@@ -189,16 +221,21 @@ async function adminView(db: D1Database) {
       )
       .all<{ key: string; updatedAt: string; updatedBy: string | null }>(),
   ])
-  return { fields: SETTING_FIELDS, values: mergeSettings(values), defaults: DEFAULT_SETTINGS, overrides: meta.results }
+  return { fields: fieldsFor(env), values: mergeSettings(values), defaults: DEFAULT_SETTINGS, overrides: meta.results }
 }
 
 export function registerSettingsAdminRoutes(routes: Hono<AppContext>) {
   // 后台读 D1 原值，不走缓存
-  routes.get('/settings', async (c) => c.json(await adminView(c.env.DB)))
+  routes.get('/settings', async (c) => c.json(await adminView(c.env)))
 
   routes.post('/settings', async (c) => {
     const admin = requireAdmin(c)
     const patch = parseSettingsPatch((await readJson<{ values: unknown }>(c)).values)
+    // 切换收款渠道：目标支付商的配置不全就拒绝，免得之后所有下单都失败
+    if (patch.paymentProvider) {
+      const problems = paymentProviderProblems(c.env, patch.paymentProvider)
+      if (problems.length) throw new ApiError(400, 'invalid_setting', `收款渠道切换到 ${patch.paymentProvider} 前需要先配好：${problems.join('；')}`)
+    }
     const db = c.env.DB
     const before = mergeSettings(await loadStored(db))
     const now = nowIso()
@@ -223,6 +260,6 @@ export function registerSettingsAdminRoutes(routes: Hono<AppContext>) {
       await c.env.KV.put(CACHE_KEY, JSON.stringify(await loadStored(db)))
       await audit(c.env, admin, 'settings.update', 'settings', 'runtime', changes)
     }
-    return c.json(await adminView(db))
+    return c.json(await adminView(c.env))
   })
 }

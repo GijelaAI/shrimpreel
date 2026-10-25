@@ -50,7 +50,7 @@ const stripePrice = (override: Record<string, Record<string, unknown>> = {}) => 
   }
 }
 
-const probe = (target: Parameters<typeof runProbe>[1], env: Record<string, unknown>) => runProbe(env as unknown as Env, target, admin)
+const probe = (target: Parameters<typeof runProbe>[1], env: Record<string, unknown>) => runProbe({ KV: { get: async () => ({}) }, ...env } as unknown as Env, target, admin)
 
 afterEach(() => {
   vi.unstubAllGlobals()
